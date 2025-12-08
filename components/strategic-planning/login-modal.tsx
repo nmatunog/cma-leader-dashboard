@@ -21,7 +21,11 @@ export function LoginModal({ onLogin }: LoginModalProps) {
       alert('Enter Name');
       return;
     }
-    onLogin(role, toTitleCase(name), um || 'Cebu Matunog Agency', agency || 'Cebu Matunog Agency');
+    if (!agency.trim()) {
+      alert('Please select an Agency');
+      return;
+    }
+    onLogin(role, toTitleCase(name), um || 'Cebu Matunog Agency', agency);
   };
 
   return (
@@ -69,13 +73,15 @@ export function LoginModal({ onLogin }: LoginModalProps) {
             </div>
             <div>
               <label className="block text-xs font-bold text-slate-600 uppercase mb-2 tracking-wide">Agency Name</label>
-              <input
-                type="text"
+              <select
                 value={agency}
                 onChange={(e) => setAgency(e.target.value)}
-                className="w-full p-3 sm:p-3.5 border-2 border-slate-200 rounded-lg sm:rounded-xl outline-none focus:border-[#D31145] focus:ring-2 focus:ring-[#D31145]/20 transition-all shadow-sm text-sm sm:text-base"
-                placeholder="e.g. Cebu Matunog"
-              />
+                className="w-full p-3 sm:p-3.5 border-2 border-slate-200 rounded-lg sm:rounded-xl outline-none focus:border-[#D31145] focus:ring-2 focus:ring-[#D31145]/20 transition-all shadow-sm text-sm sm:text-base bg-white cursor-pointer"
+              >
+                <option value="">Select Agency</option>
+                <option value="Cebu Matunog Agency">Cebu Matunog Agency</option>
+                <option value="Cebu Ez Matunog Premier Agency">Cebu Ez Matunog Premier Agency</option>
+              </select>
             </div>
           </div>
 
