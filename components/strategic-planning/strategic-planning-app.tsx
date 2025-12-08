@@ -44,7 +44,7 @@ export function StrategicPlanningApp() {
     }
     
     const savedName = localStorage.getItem('sp_user_name');
-    const savedRole = localStorage.getItem('sp_user_role') as 'advisor' | 'leader' | null;
+    const savedRole = localStorage.getItem('sp_user_role') as 'advisor' | 'leader' | 'admin' | null;
     const savedRank = localStorage.getItem('sp_user_rank') as string | null;
     
     // Only auto-login if we have valid saved data
