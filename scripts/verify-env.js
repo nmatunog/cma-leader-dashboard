@@ -5,6 +5,25 @@
  * Run this before deployment to ensure all required variables are set
  */
 
+const fs = require('fs');
+const path = require('path');
+
+// Load .env.local if it exists (for local development)
+const envLocalPath = path.join(process.cwd(), '.env.local');
+if (fs.existsSync(envLocalPath)) {
+  const envContent = fs.readFileSync(envLocalPath, 'utf8');
+  envContent.split('\n').forEach((line) => {
+    const trimmed = line.trim();
+    if (trimmed && !trimmed.startsWith('#') && trimmed.includes('=')) {
+      const [key, ...valueParts] = trimmed.split('=');
+      const value = valueParts.join('=').trim();
+      if (key && value && !process.env[key]) {
+        process.env[key] = value;
+      }
+    }
+  });
+}
+
 const requiredVars = [
   'NEXT_PUBLIC_FIREBASE_API_KEY',
   'NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN',
