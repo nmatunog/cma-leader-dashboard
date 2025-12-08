@@ -173,6 +173,7 @@ export async function syncAllSheets(): Promise<{
     let agents: Agent[] = [];
     let headers: { leaders?: string[]; agents?: string[] } = {};
     let leadersDebug: any = null;
+    let agencyName: string | undefined = undefined;
     
     try {
       const result = await loadAllDataFromSheets({
@@ -184,6 +185,7 @@ export async function syncAllSheets(): Promise<{
       agents = result.agents;
       headers = result.headers;
       leadersDebug = result.leadersDebug;
+      agencyName = result.agencySummary?.agencyName;
     } catch (error) {
       console.error('Error in loadAllDataFromSheets:', error);
       const errorMsg = error instanceof Error ? error.message : String(error);
@@ -222,7 +224,7 @@ export async function syncAllSheets(): Promise<{
     // Calculate Agency Summary from Leaders sheet totals
     // Agency name is extracted from Leaders sheet during loadAllDataFromSheets
     console.log('Calculating Agency Summary from Leaders sheet totals...');
-    const agencySummary = calculateAgencySummaryFromLeaders(leaders, agents, data.agencySummary?.agencyName);
+    const agencySummary = calculateAgencySummaryFromLeaders(leaders, agents, agencyName);
     
     // Store agency name in localStorage for sidebar display
     if (agencySummary.agencyName) {

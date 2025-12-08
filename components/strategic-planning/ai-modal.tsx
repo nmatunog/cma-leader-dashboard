@@ -12,7 +12,8 @@ interface AIModalProps {
 export function AIModal({ isOpen, onClose, title, content }: AIModalProps) {
   if (!isOpen) return null;
 
-  const htmlContent = marked(content || 'No content available.');
+  // marked() returns a string synchronously in the version we're using
+  const htmlContent: string = marked(content || 'No content available.') as string;
 
   return (
     <div className="fixed inset-0 bg-white/80 backdrop-blur-md z-[90] flex items-center justify-center p-3 sm:p-4 overflow-y-auto">

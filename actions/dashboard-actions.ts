@@ -137,7 +137,7 @@ export async function saveAgencySummary(
         if (current.overrides![key as keyof typeof current.overrides] && current[metricKey] !== undefined) {
           // Only update if it's a number field
           if (typeof current[metricKey] === 'number') {
-            updated[metricKey] = current[metricKey] as number;
+            (updated as any)[metricKey] = current[metricKey] as number;
           }
         }
       });

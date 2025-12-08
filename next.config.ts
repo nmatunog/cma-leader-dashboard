@@ -7,7 +7,6 @@ const nextConfig: NextConfig = {
   
   // Production optimizations
   reactStrictMode: true,
-  swcMinify: true,
   
   // Optimize images if used
   images: {
