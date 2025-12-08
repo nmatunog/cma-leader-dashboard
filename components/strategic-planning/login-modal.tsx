@@ -2,15 +2,19 @@
 
 import { useState } from 'react';
 import { UserState } from './strategic-planning-app';
+import { verifyAdminCredentials } from '@/lib/admin-config';
 
 interface LoginModalProps {
-  onLogin: (role: 'advisor' | 'leader', name: string, um: string, agency: string) => void;
+  onLogin: (role: 'advisor' | 'leader' | 'admin', name: string, um: string, agency: string) => void;
 }
 
 export function LoginModal({ onLogin }: LoginModalProps) {
   const [name, setName] = useState('');
   const [um, setUM] = useState('');
   const [agency, setAgency] = useState('');
+  const [showAdminLogin, setShowAdminLogin] = useState(false);
+  const [adminUsername, setAdminUsername] = useState('');
+  const [adminPassword, setAdminPassword] = useState('');
 
   const toTitleCase = (str: string) => {
     return str.toLowerCase().split(' ').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
@@ -26,6 +30,21 @@ export function LoginModal({ onLogin }: LoginModalProps) {
       return;
     }
     onLogin(role, toTitleCase(name), um || 'Cebu Matunog Agency', agency);
+  };
+
+  const handleAdminLogin = () => {
+    if (!adminUsername.trim() || !adminPassword.trim()) {
+      alert('Please enter both username and password');
+      return;
+    }
+    
+    if (verifyAdminCredentials(adminUsername.trim(), adminPassword)) {
+      onLogin('admin', 'Admin', 'System', 'All Agencies');
+      setAdminPassword(''); // Clear password for security
+    } else {
+      alert('Invalid admin credentials');
+      setAdminPassword(''); // Clear password on failed attempt
+    }
   };
 
   return (
@@ -87,7 +106,7 @@ export function LoginModal({ onLogin }: LoginModalProps) {
 
           <div className="pt-4 sm:pt-5 border-t-2 border-slate-200">
             <label className="block text-xs font-bold text-slate-600 uppercase mb-3 sm:mb-4 text-center tracking-wide">Select Your Role</label>
-            <div className="grid grid-cols-2 gap-3 sm:gap-4">
+            <div className="grid grid-cols-2 gap-3 sm:gap-4 mb-3 sm:mb-4">
               <button
                 onClick={() => handleLogin('advisor')}
                 className="p-4 sm:p-5 border-2 border-slate-200 rounded-lg sm:rounded-xl hover:border-[#D31145] hover:bg-gradient-to-br hover:from-red-50 hover:to-pink-50 transition-all group shadow-sm hover:shadow-md"
@@ -104,6 +123,59 @@ export function LoginModal({ onLogin }: LoginModalProps) {
                 <div className="font-bold text-slate-700 group-hover:text-[#D31145] text-sm sm:text-base">Leader</div>
                 <div className="text-[10px] sm:text-xs text-slate-500 mt-0.5 sm:mt-1">Manager View</div>
               </button>
+            </div>
+            
+            {/* Admin Login Section */}
+            <div className="border-t border-slate-200 pt-3 sm:pt-4">
+              <button
+                onClick={() => setShowAdminLogin(!showAdminLogin)}
+                className="w-full text-xs sm:text-sm text-slate-500 hover:text-[#D31145] transition-colors flex items-center justify-center gap-2"
+              >
+                <span>🔐</span>
+                <span>{showAdminLogin ? 'Hide' : 'Show'} Admin Login</span>
+                <span>{showAdminLogin ? '▲' : '▼'}</span>
+              </button>
+              
+              {showAdminLogin && (
+                <div className="mt-3 sm:mt-4 space-y-3 sm:space-y-4 bg-slate-50 p-3 sm:p-4 rounded-lg border border-slate-200">
+                  <div>
+                    <label className="block text-xs font-bold text-slate-600 uppercase mb-2 tracking-wide">Admin Username</label>
+                    <input
+                      type="text"
+                      value={adminUsername}
+                      onChange={(e) => setAdminUsername(e.target.value)}
+                      className="w-full p-3 sm:p-3.5 border-2 border-slate-200 rounded-lg sm:rounded-xl outline-none focus:border-[#D31145] focus:ring-2 focus:ring-[#D31145]/20 transition-all shadow-sm text-sm sm:text-base"
+                      placeholder="Enter admin username"
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter' && adminUsername.trim() && adminPassword.trim()) {
+                          handleAdminLogin();
+                        }
+                      }}
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-bold text-slate-600 uppercase mb-2 tracking-wide">Admin Password</label>
+                    <input
+                      type="password"
+                      value={adminPassword}
+                      onChange={(e) => setAdminPassword(e.target.value)}
+                      className="w-full p-3 sm:p-3.5 border-2 border-slate-200 rounded-lg sm:rounded-xl outline-none focus:border-[#D31145] focus:ring-2 focus:ring-[#D31145]/20 transition-all shadow-sm text-sm sm:text-base"
+                      placeholder="Enter admin password"
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter' && adminUsername.trim() && adminPassword.trim()) {
+                          handleAdminLogin();
+                        }
+                      }}
+                    />
+                  </div>
+                  <button
+                    onClick={handleAdminLogin}
+                    className="w-full p-3 sm:p-3.5 bg-gradient-to-r from-[#D31145] to-red-600 text-white font-bold rounded-lg sm:rounded-xl hover:from-red-600 hover:to-red-700 transition-all shadow-md hover:shadow-lg"
+                  >
+                    🔐 Login as Admin
+                  </button>
+                </div>
+              )}
             </div>
           </div>
         </div>

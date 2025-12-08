@@ -11,7 +11,7 @@ import { PathToPremierTab } from './tabs/path-to-premier-tab';
 import { GoalSettingTab } from './tabs/goal-setting-tab';
 
 export interface UserState {
-  role: 'advisor' | 'leader';
+  role: 'advisor' | 'leader' | 'admin';
   rank: string;
   name: string;
   um: string;
@@ -48,32 +48,46 @@ export function StrategicPlanningApp() {
     const savedRank = localStorage.getItem('sp_user_rank') as string | null;
     
     // Only auto-login if we have valid saved data
-    if (savedName && savedName.trim() && savedRole && (savedRole === 'advisor' || savedRole === 'leader')) {
-      const rank = savedRank || (savedRole === 'leader' ? 'UM' : 'LA');
+    if (savedName && savedName.trim() && savedRole && (savedRole === 'advisor' || savedRole === 'leader' || savedRole === 'admin')) {
+      let rank = savedRank || 'LA';
+      if (savedRole === 'leader') rank = 'UM';
+      else if (savedRole === 'admin') rank = 'ADMIN';
+      
       setOriginalRank(rank);
       setUserState({
         role: savedRole,
         rank: rank,
         name: savedName,
-        um: localStorage.getItem('sp_user_um') || 'Cebu Matunog Agency',
-        agency: localStorage.getItem('sp_user_agency') || 'Cebu Matunog Agency',
+        um: localStorage.getItem('sp_user_um') || (savedRole === 'admin' ? 'System' : 'Cebu Matunog Agency'),
+        agency: localStorage.getItem('sp_user_agency') || (savedRole === 'admin' ? 'All Agencies' : 'Cebu Matunog Agency'),
       });
       setShowLogin(false);
+      
+      // If admin, redirect to reports page
+      if (savedRole === 'admin') {
+        window.location.href = '/reports';
+      }
     } else {
       // Ensure login shows if no saved data or invalid data
       setShowLogin(true);
     }
   }, []);
 
-  const handleLogin = (role: 'advisor' | 'leader', name: string, um: string, agency: string) => {
-    const rank = role === 'leader' ? 'UM' : 'LA';
+  const handleLogin = (role: 'advisor' | 'leader' | 'admin', name: string, um: string, agency: string) => {
+    let rank = 'LA';
+    if (role === 'leader') {
+      rank = 'UM';
+    } else if (role === 'admin') {
+      rank = 'ADMIN';
+    }
+    
     setOriginalRank(rank); // Store original rank from login
     const newState: UserState = {
       role,
       rank: rank,
       name,
-      um: um || 'Cebu Matunog Agency',
-      agency: agency || 'Cebu Matunog Agency',
+      um: um || 'System',
+      agency: agency || 'All Agencies',
     };
     setUserState(newState);
     setShowLogin(false);
@@ -82,8 +96,13 @@ export function StrategicPlanningApp() {
     localStorage.setItem('sp_user_name', name);
     localStorage.setItem('sp_user_role', role);
     localStorage.setItem('sp_user_rank', rank); // Save original rank
-    localStorage.setItem('sp_user_um', um || 'Cebu Matunog Agency');
-    localStorage.setItem('sp_user_agency', agency || 'Cebu Matunog Agency');
+    localStorage.setItem('sp_user_um', um || 'System');
+    localStorage.setItem('sp_user_agency', agency || 'All Agencies');
+    
+    // If admin, redirect to reports page
+    if (role === 'admin') {
+      window.location.href = '/reports';
+    }
   };
 
   const handleLogout = () => {
