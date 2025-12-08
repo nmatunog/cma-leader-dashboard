@@ -29,7 +29,8 @@ EXPO_PUBLIC_FIREBASE_MEASUREMENT_ID=...
 
 ## Current scaffold
 - Bottom tabs for: Overview, Advisor Sim, Leader HQ, Path to Premier, Goals, Reports
-- Placeholder screens (wire in logic from web app utilities next)
+- Path to Premier screen implemented (mobile-optimized, ACS 3.0 requirements per rank, NGE -> recruits conversion, gap view)
+- Other tabs are placeholders to be wired next
 
 ## Next steps (recommended)
 1) Port shared logic:

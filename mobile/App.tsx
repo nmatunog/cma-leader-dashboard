@@ -1,9 +1,11 @@
+import 'react-native-gesture-handler';
 import React from 'react';
 import { NavigationContainer } from '@react-navigation/native';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { StatusBar } from 'expo-status-bar';
 import { Text, View, StyleSheet } from 'react-native';
+import { PathToPremierScreen } from './src/screens/PathToPremierScreen';
 
 const Tab = createBottomTabNavigator();
 
@@ -40,7 +42,7 @@ export default function App() {
             {() => <PlaceholderScreen title="Leader HQ" />}
           </Tab.Screen>
           <Tab.Screen name="Path to Premier">
-            {() => <PlaceholderScreen title="Path to Premier" />}
+            {() => <PathToPremierScreen />}
           </Tab.Screen>
           <Tab.Screen name="Goals">
             {() => <PlaceholderScreen title="Goal Setting" />}
