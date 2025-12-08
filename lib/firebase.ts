@@ -17,27 +17,35 @@ function getFirebaseApp(): FirebaseApp {
       measurementId: process.env.NEXT_PUBLIC_FIREBASE_MEASUREMENT_ID,
     };
 
-    // Validate required environment variables in production
-    if (process.env.NODE_ENV === 'production') {
-      const requiredVars = [
-        'NEXT_PUBLIC_FIREBASE_API_KEY',
-        'NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN',
-        'NEXT_PUBLIC_FIREBASE_PROJECT_ID',
-        'NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET',
-        'NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID',
-        'NEXT_PUBLIC_FIREBASE_APP_ID',
-      ];
-      
-      const missingVars = requiredVars.filter(
-        (varName) => !process.env[varName]
-      );
-      
-      if (missingVars.length > 0) {
+    // Validate required environment variables
+    // Check both server-side and client-side availability
+    const requiredVars = [
+      'NEXT_PUBLIC_FIREBASE_API_KEY',
+      'NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN',
+      'NEXT_PUBLIC_FIREBASE_PROJECT_ID',
+      'NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET',
+      'NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID',
+      'NEXT_PUBLIC_FIREBASE_APP_ID',
+    ];
+    
+    const missingVars = requiredVars.filter(
+      (varName) => !process.env[varName] || process.env[varName] === ''
+    );
+    
+    if (missingVars.length > 0) {
+      // Only throw error on server-side (build time)
+      // On client-side, log warning but allow graceful degradation
+      if (typeof window === 'undefined') {
         console.error(
           `Missing required Firebase environment variables: ${missingVars.join(', ')}`
         );
         throw new Error(
           `Firebase configuration incomplete. Missing: ${missingVars.join(', ')}`
+        );
+      } else {
+        // Client-side: log warning but don't throw (allows app to load)
+        console.warn(
+          `Missing required Firebase environment variables: ${missingVars.join(', ')}. Firebase features may not work.`
         );
       }
     }
