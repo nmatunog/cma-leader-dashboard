@@ -73,25 +73,37 @@ export function PathToPremierTab({ userState }: PathToPremierTabProps) {
   const chartInstanceRef = useRef<Chart | null>(null);
 
   useEffect(() => {
-    // Determine current tier
+    // Determine current tier based on ALL requirements (must meet ALL criteria)
     let tierIndex = 0;
+    
+    // Check Premier tier (all requirements must be met)
     if (currentANP >= TIERS[2].anp && currentRecruits >= TIERS[2].recruits && currentPersistency >= TIERS[2].persistency) {
       tierIndex = 2; // Premier
-    } else if (currentANP >= TIERS[1].anp && currentRecruits >= TIERS[1].recruits && currentPersistency >= TIERS[1].persistency) {
+    } 
+    // Check Executive tier (all requirements must be met)
+    else if (currentANP >= TIERS[1].anp && currentRecruits >= TIERS[1].recruits && currentPersistency >= TIERS[1].persistency) {
       tierIndex = 1; // Executive
     }
+    // Otherwise, Standard tier
+    else {
+      tierIndex = 0; // Standard
+    }
     
-    setCurrentTier(TIERS[tierIndex]);
-    setNextTier(tierIndex < TIERS.length - 1 ? TIERS[tierIndex + 1] : null);
+    const currentTierValue = TIERS[tierIndex];
+    const nextTierValue = tierIndex < TIERS.length - 1 ? TIERS[tierIndex + 1] : null;
+    
+    setCurrentTier(currentTierValue);
+    setNextTier(nextTierValue);
 
-    // Calculate gaps to next tier
-    if (nextTier && tierIndex < TIERS.length - 1) {
+    // Calculate gaps to next tier (use nextTierValue directly, not state)
+    if (nextTierValue) {
       setGaps({
-        anp: Math.max(0, nextTier.anp - currentANP),
-        recruits: Math.max(0, nextTier.recruits - currentRecruits),
-        persistency: Math.max(0, nextTier.persistency - currentPersistency),
+        anp: Math.max(0, nextTierValue.anp - currentANP),
+        recruits: Math.max(0, nextTierValue.recruits - currentRecruits),
+        persistency: Math.max(0, nextTierValue.persistency - currentPersistency),
       });
     } else {
+      // Already at highest tier
       setGaps({ anp: 0, recruits: 0, persistency: 0 });
     }
 
@@ -150,7 +162,7 @@ export function PathToPremierTab({ userState }: PathToPremierTabProps) {
 
       chartInstanceRef.current = new Chart(ctx, config);
     }
-  }, [currentANP, currentRecruits, currentPersistency, nextTier]);
+  }, [currentANP, currentRecruits, currentPersistency]);
 
   return (
     <section className="space-y-4 sm:space-y-6">
