@@ -70,22 +70,58 @@ function getFirebaseApp(): FirebaseApp {
   return app;
 }
 
-function getFirestoreDB(): Firestore {
+function getFirestoreDB(): Firestore | null {
   if (!dbInstance) {
     const firebaseApp = getFirebaseApp();
     if (!firebaseApp) {
+      // On client-side, return null instead of throwing to allow app to load
+      if (typeof window !== 'undefined') {
+        return null;
+      }
+      // Server-side should throw
       throw new Error('Firebase is not initialized. Please check environment variables.');
     }
     try {
       dbInstance = getFirestore(firebaseApp);
     } catch (error) {
       console.error('Failed to get Firestore instance:', error);
+      if (typeof window !== 'undefined') {
+        return null;
+      }
       throw new Error('Failed to initialize Firestore. Please check Firebase configuration.');
     }
   }
   return dbInstance;
 }
 
-// Export db as Firestore instance (initialized lazily)
-export const db = getFirestoreDB();
+// Export db - initialized lazily, won't throw on client-side if Firebase isn't configured
+// The service layer will catch errors when db is actually used
+let _dbInstance: Firestore | null = null;
+export const db = (() => {
+  try {
+    _dbInstance = getFirestoreDB();
+    if (!_dbInstance && typeof window !== 'undefined') {
+      // On client-side, if Firebase isn't configured, create a proxy that throws helpful errors when used
+      return new Proxy({} as Firestore, {
+        get() {
+          throw new Error('Firebase is not initialized. Please check Firebase environment variables in Netlify settings and trigger a new deployment after adding them.');
+        }
+      });
+    }
+    if (!_dbInstance) {
+      throw new Error('Firestore is not available');
+    }
+    return _dbInstance;
+  } catch (error) {
+    if (typeof window !== 'undefined') {
+      // Return proxy that throws helpful error on client-side
+      return new Proxy({} as Firestore, {
+        get() {
+          throw new Error(`Firebase is not available. Please check Firebase environment variables in Netlify and trigger a new deployment. Error: ${error instanceof Error ? error.message : 'Unknown error'}`);
+        }
+      });
+    }
+    throw error;
+  }
+})();
 
