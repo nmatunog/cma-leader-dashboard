@@ -3,6 +3,7 @@
 import { useState } from 'react';
 import { UserState } from './strategic-planning-app';
 import { verifyAdminCredentials } from '@/lib/admin-config';
+import { signInAnonymouslyAuth } from '@/lib/auth';
 
 interface LoginModalProps {
   onLogin: (role: 'advisor' | 'leader' | 'admin', name: string, um: string, agency: string) => void;
@@ -15,12 +16,13 @@ export function LoginModal({ onLogin }: LoginModalProps) {
   const [showAdminLogin, setShowAdminLogin] = useState(false);
   const [adminUsername, setAdminUsername] = useState('');
   const [adminPassword, setAdminPassword] = useState('');
+  const [isSigningIn, setIsSigningIn] = useState(false);
 
   const toTitleCase = (str: string) => {
     return str.toLowerCase().split(' ').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
   };
 
-  const handleLogin = (role: 'advisor' | 'leader') => {
+  const handleLogin = async (role: 'advisor' | 'leader') => {
     if (!name.trim()) {
       alert('Enter Name');
       return;
@@ -29,18 +31,39 @@ export function LoginModal({ onLogin }: LoginModalProps) {
       alert('Please select an Agency');
       return;
     }
-    onLogin(role, toTitleCase(name), um || 'Cebu Matunog Agency', agency);
+    
+    setIsSigningIn(true);
+    try {
+      // Sign in anonymously with Firebase Auth
+      await signInAnonymouslyAuth();
+      // Call the original login handler
+      onLogin(role, toTitleCase(name), um || 'Cebu Matunog Agency', agency);
+    } catch (error) {
+      console.error('Error signing in:', error);
+      alert(`Failed to sign in: ${error instanceof Error ? error.message : 'Unknown error'}`);
+      setIsSigningIn(false);
+    }
   };
 
-  const handleAdminLogin = () => {
+  const handleAdminLogin = async () => {
     if (!adminUsername.trim() || !adminPassword.trim()) {
       alert('Please enter both username and password');
       return;
     }
     
     if (verifyAdminCredentials(adminUsername.trim(), adminPassword)) {
-      onLogin('admin', 'Admin', 'System', 'All Agencies');
-      setAdminPassword(''); // Clear password for security
+      setIsSigningIn(true);
+      try {
+        // Sign in anonymously with Firebase Auth for admin too
+        await signInAnonymouslyAuth();
+        onLogin('admin', 'Admin', 'System', 'All Agencies');
+        setAdminPassword(''); // Clear password for security
+      } catch (error) {
+        console.error('Error signing in admin:', error);
+        alert(`Failed to sign in: ${error instanceof Error ? error.message : 'Unknown error'}`);
+        setIsSigningIn(false);
+        setAdminPassword(''); // Clear password on failed attempt
+      }
     } else {
       alert('Invalid admin credentials');
       setAdminPassword(''); // Clear password on failed attempt
@@ -109,18 +132,20 @@ export function LoginModal({ onLogin }: LoginModalProps) {
             <div className="grid grid-cols-2 gap-3 sm:gap-4 mb-3 sm:mb-4">
               <button
                 onClick={() => handleLogin('advisor')}
-                className="p-4 sm:p-5 border-2 border-slate-200 rounded-lg sm:rounded-xl hover:border-[#D31145] hover:bg-gradient-to-br hover:from-red-50 hover:to-pink-50 transition-all group shadow-sm hover:shadow-md"
+                disabled={isSigningIn}
+                className="p-4 sm:p-5 border-2 border-slate-200 rounded-lg sm:rounded-xl hover:border-[#D31145] hover:bg-gradient-to-br hover:from-red-50 hover:to-pink-50 transition-all group shadow-sm hover:shadow-md disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 <div className="text-2xl sm:text-3xl mb-1.5 sm:mb-2 group-hover:scale-110 transition-transform">🛡️</div>
-                <div className="font-bold text-slate-700 group-hover:text-[#D31145] text-sm sm:text-base">Advisor</div>
+                <div className="font-bold text-slate-700 group-hover:text-[#D31145] text-sm sm:text-base">{isSigningIn ? 'Signing in...' : 'Advisor'}</div>
                 <div className="text-[10px] sm:text-xs text-slate-500 mt-0.5 sm:mt-1">Agent View</div>
               </button>
               <button
                 onClick={() => handleLogin('leader')}
-                className="p-4 sm:p-5 border-2 border-slate-200 rounded-lg sm:rounded-xl hover:border-[#D31145] hover:bg-gradient-to-br hover:from-red-50 hover:to-pink-50 transition-all group shadow-sm hover:shadow-md"
+                disabled={isSigningIn}
+                className="p-4 sm:p-5 border-2 border-slate-200 rounded-lg sm:rounded-xl hover:border-[#D31145] hover:bg-gradient-to-br hover:from-red-50 hover:to-pink-50 transition-all group shadow-sm hover:shadow-md disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 <div className="text-2xl sm:text-3xl mb-1.5 sm:mb-2 group-hover:scale-110 transition-transform">👑</div>
-                <div className="font-bold text-slate-700 group-hover:text-[#D31145] text-sm sm:text-base">Leader</div>
+                <div className="font-bold text-slate-700 group-hover:text-[#D31145] text-sm sm:text-base">{isSigningIn ? 'Signing in...' : 'Leader'}</div>
                 <div className="text-[10px] sm:text-xs text-slate-500 mt-0.5 sm:mt-1">Manager View</div>
               </button>
             </div>
@@ -170,9 +195,10 @@ export function LoginModal({ onLogin }: LoginModalProps) {
                   </div>
                   <button
                     onClick={handleAdminLogin}
-                    className="w-full p-3 sm:p-3.5 bg-gradient-to-r from-[#D31145] to-red-600 text-white font-bold rounded-lg sm:rounded-xl hover:from-red-600 hover:to-red-700 transition-all shadow-md hover:shadow-lg"
+                    disabled={isSigningIn}
+                    className="w-full p-3 sm:p-3.5 bg-gradient-to-r from-[#D31145] to-red-600 text-white font-bold rounded-lg sm:rounded-xl hover:from-red-600 hover:to-red-700 transition-all shadow-md hover:shadow-lg disabled:opacity-50 disabled:cursor-not-allowed"
                   >
-                    🔐 Login as Admin
+                    {isSigningIn ? 'Signing in...' : '🔐 Login as Admin'}
                   </button>
                 </div>
               )}

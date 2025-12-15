@@ -9,6 +9,7 @@ import { AdvisorSimTab } from './tabs/advisor-sim-tab';
 import { LeaderHQTab } from './tabs/leader-hq-tab';
 import { PathToPremierTab } from './tabs/path-to-premier-tab';
 import { GoalSettingTab } from './tabs/goal-setting-tab';
+import { signOutAuth, isAuthenticated } from '@/lib/auth';
 
 export interface UserState {
   role: 'advisor' | 'leader' | 'admin';
@@ -43,12 +44,15 @@ export function StrategicPlanningApp() {
       return;
     }
     
+    // Check Firebase Auth state - if not authenticated, show login
+    const authenticated = isAuthenticated();
+    
     const savedName = localStorage.getItem('sp_user_name');
     const savedRole = localStorage.getItem('sp_user_role') as 'advisor' | 'leader' | 'admin' | null;
     const savedRank = localStorage.getItem('sp_user_rank') as string | null;
     
-    // Only auto-login if we have valid saved data
-    if (savedName && savedName.trim() && savedRole && (savedRole === 'advisor' || savedRole === 'leader' || savedRole === 'admin')) {
+    // Only auto-login if we have valid saved data AND Firebase Auth is authenticated
+    if (authenticated && savedName && savedName.trim() && savedRole && (savedRole === 'advisor' || savedRole === 'leader' || savedRole === 'admin')) {
       let rank = savedRank || 'LA';
       if (savedRole === 'leader') rank = 'UM';
       else if (savedRole === 'admin') rank = 'ADMIN';
@@ -68,7 +72,15 @@ export function StrategicPlanningApp() {
         window.location.href = '/reports';
       }
     } else {
-      // Ensure login shows if no saved data or invalid data
+      // If not authenticated or no saved data, show login
+      // Also clear localStorage if Firebase Auth is not authenticated
+      if (!authenticated) {
+        localStorage.removeItem('sp_user_name');
+        localStorage.removeItem('sp_user_role');
+        localStorage.removeItem('sp_user_rank');
+        localStorage.removeItem('sp_user_um');
+        localStorage.removeItem('sp_user_agency');
+      }
       setShowLogin(true);
     }
   }, []);
@@ -105,12 +117,23 @@ export function StrategicPlanningApp() {
     }
   };
 
-  const handleLogout = () => {
+  const handleLogout = async () => {
+    try {
+      // Sign out from Firebase Auth
+      await signOutAuth();
+    } catch (error) {
+      console.error('Error signing out from Firebase:', error);
+      // Continue with logout even if Firebase sign out fails
+    }
+    
+    // Clear localStorage
     localStorage.removeItem('sp_user_name');
     localStorage.removeItem('sp_user_role');
     localStorage.removeItem('sp_user_rank');
     localStorage.removeItem('sp_user_um');
     localStorage.removeItem('sp_user_agency');
+    
+    // Reset state
     setShowLogin(true);
     setOriginalRank('LA');
     setUserState({

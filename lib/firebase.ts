@@ -1,8 +1,10 @@
 import { initializeApp, getApps, FirebaseApp } from 'firebase/app';
 import { getFirestore, Firestore } from 'firebase/firestore';
+import { getAuth, Auth } from 'firebase/auth';
 
 let app: FirebaseApp | null = null;
 let dbInstance: Firestore | null = null;
+let authInstance: Auth | null = null;
 
 // Lazy initialize Firebase
 function getFirebaseApp(): FirebaseApp {
@@ -93,6 +95,66 @@ function getFirestoreDB(): Firestore | null {
   }
   return dbInstance;
 }
+
+// Get Firebase Auth instance
+function getFirebaseAuth(): Auth | null {
+  try {
+    if (!authInstance) {
+      const firebaseApp = getFirebaseApp();
+      if (!firebaseApp) {
+        if (typeof window !== 'undefined') {
+          return null;
+        }
+        throw new Error('Firebase is not initialized. Please check environment variables.');
+      }
+      try {
+        authInstance = getAuth(firebaseApp);
+      } catch (error) {
+        console.error('Failed to get Firebase Auth instance:', error);
+        if (typeof window !== 'undefined') {
+          return null;
+        }
+        throw new Error('Failed to initialize Firebase Auth. Please check Firebase configuration.');
+      }
+    }
+    return authInstance;
+  } catch (error) {
+    if (typeof window !== 'undefined') {
+      console.warn('Firebase Auth initialization failed:', error);
+      return null;
+    }
+    throw error;
+  }
+}
+
+// Export auth - initialized lazily
+let _authInstance: Auth | null = null;
+export const auth = (() => {
+  try {
+    _authInstance = getFirebaseAuth();
+    if (!_authInstance && typeof window !== 'undefined') {
+      // Return proxy that throws helpful error on client-side when used
+      return new Proxy({} as Auth, {
+        get() {
+          throw new Error('Firebase Auth is not initialized. Please check Firebase environment variables in Netlify settings and trigger a new deployment after adding them.');
+        }
+      });
+    }
+    if (!_authInstance) {
+      throw new Error('Firebase Auth is not available');
+    }
+    return _authInstance;
+  } catch (error) {
+    if (typeof window !== 'undefined') {
+      return new Proxy({} as Auth, {
+        get() {
+          throw new Error(`Firebase Auth is not available. Please check Firebase environment variables in Netlify and trigger a new deployment. Error: ${error instanceof Error ? error.message : 'Unknown error'}`);
+        }
+      });
+    }
+    throw error;
+  }
+})();
 
 // Export db - initialized lazily, won't throw on client-side if Firebase isn't configured
 // The service layer will catch errors when db is actually used
