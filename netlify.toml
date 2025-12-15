@@ -9,3 +9,7 @@ package = "@netlify/plugin-nextjs"
 [build.environment]
 NODE_VERSION = "20"
 
+# Optimize function bundling
+[functions]
+  node_bundler = "esbuild"
+
