@@ -62,6 +62,24 @@ export interface StrategicPlanningGoal {
 // Save strategic planning goal
 export async function saveStrategicPlanningGoal(goal: StrategicPlanningGoal): Promise<{ success: boolean; error?: string }> {
   try {
+    // Check if Firebase is properly configured
+    const requiredVars = [
+      'NEXT_PUBLIC_FIREBASE_API_KEY',
+      'NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN',
+      'NEXT_PUBLIC_FIREBASE_PROJECT_ID',
+    ];
+    
+    const missingVars = requiredVars.filter(
+      (varName) => !process.env[varName] || process.env[varName] === ''
+    );
+    
+    if (missingVars.length > 0) {
+      return {
+        success: false,
+        error: 'Firebase is not configured. Please check environment variables.',
+      };
+    }
+    
     // Create a unique ID based on user and agency
     const goalId = `${goal.userId}_${goal.agencyName}_${Date.now()}`;
     
@@ -71,15 +89,32 @@ export async function saveStrategicPlanningGoal(goal: StrategicPlanningGoal): Pr
       submittedAt: goal.submittedAt || new Date(),
     };
     
-    const docRef = doc(db, GOALS_COLLECTION, goalId);
-    await setDoc(docRef, goalData, { merge: true });
+    // Add timeout to prevent hanging (15 seconds should be enough for Firestore)
+    const timeoutPromise = new Promise<never>((_, reject) => {
+      setTimeout(() => reject(new Error('Save operation timed out after 15 seconds. Please check your internet connection and Firebase configuration.')), 15000);
+    });
+    
+    let docRef;
+    try {
+      docRef = doc(db, GOALS_COLLECTION, goalId);
+    } catch (dbError) {
+      console.error('Error getting Firestore doc reference:', dbError);
+      return {
+        success: false,
+        error: 'Firestore is not available. Please check Firebase configuration.',
+      };
+    }
+    
+    const savePromise = setDoc(docRef, goalData, { merge: true });
+    
+    await Promise.race([savePromise, timeoutPromise]);
     
     return { success: true };
   } catch (error) {
     console.error('Error saving strategic planning goal:', error);
     return {
       success: false,
-      error: error instanceof Error ? error.message : 'Unknown error',
+      error: error instanceof Error ? error.message : 'Unknown error occurred',
     };
   }
 }

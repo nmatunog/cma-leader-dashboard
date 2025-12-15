@@ -47,11 +47,22 @@ function getFirebaseApp(): FirebaseApp {
         console.warn(
           `Missing required Firebase environment variables: ${missingVars.join(', ')}. Firebase features may not work.`
         );
+        // Don't initialize Firebase if config is incomplete
+        // Return a mock app instance that will fail gracefully on operations
+        return null as any;
       }
     }
 
     if (!getApps().length) {
-      app = initializeApp(firebaseConfig);
+      try {
+        app = initializeApp(firebaseConfig);
+      } catch (error) {
+        console.error('Failed to initialize Firebase:', error);
+        if (typeof window === 'undefined') {
+          throw error;
+        }
+        return null as any;
+      }
     } else {
       app = getApps()[0];
     }
@@ -62,7 +73,15 @@ function getFirebaseApp(): FirebaseApp {
 function getFirestoreDB(): Firestore {
   if (!dbInstance) {
     const firebaseApp = getFirebaseApp();
-    dbInstance = getFirestore(firebaseApp);
+    if (!firebaseApp) {
+      throw new Error('Firebase is not initialized. Please check environment variables.');
+    }
+    try {
+      dbInstance = getFirestore(firebaseApp);
+    } catch (error) {
+      console.error('Failed to get Firestore instance:', error);
+      throw new Error('Failed to initialize Firestore. Please check Firebase configuration.');
+    }
   }
   return dbInstance;
 }
