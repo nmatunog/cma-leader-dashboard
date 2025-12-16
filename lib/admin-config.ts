@@ -12,7 +12,7 @@
 // In production, these should come from environment variables
 export const ADMIN_CREDENTIALS = {
   username: process.env.NEXT_PUBLIC_ADMIN_USERNAME || 'admin',
-  password: process.env.NEXT_PUBLIC_ADMIN_PASSWORD || '1CMA2026Admin!',
+  password: process.env.NEXT_PUBLIC_ADMIN_PASSWORD || '@Nbm0823',
 };
 
 /**

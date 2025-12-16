@@ -1,5 +1,8 @@
 // Core data types for the CMA Dashboard
 
+// Export user authentication types
+export * from './user';
+
 export interface Leader {
   id: string;
   name: string;

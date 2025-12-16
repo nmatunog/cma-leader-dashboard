@@ -173,3 +173,4 @@ npm run verify-env
 - Verify all environment variables are set correctly
 - Ensure Anonymous Auth is enabled in Firebase
 
+

@@ -138,3 +138,4 @@ Would you like me to:
 2. Or switch to Vercel (easier, made for Next.js)?
 3. Or try one more fix for Netlify?
 
+
