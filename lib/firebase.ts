@@ -134,11 +134,11 @@ export const auth = (() => {
     _authInstance = getFirebaseAuth();
     if (!_authInstance && typeof window !== 'undefined') {
       // Return proxy that throws helpful error on client-side when used
-      return new Proxy({} as Auth, {
-        get() {
-          throw new Error('Firebase Auth is not initialized. Please check Firebase environment variables in Netlify settings and trigger a new deployment after adding them.');
-        }
-      });
+        return new Proxy({} as Auth, {
+                        get() {
+                            throw new Error('Firebase Auth is not initialized. Please check Firebase environment variables in your .env.local file (for local development) or deployment platform settings (for production). Restart the dev server after updating .env.local.');
+                        }
+                    });
     }
     if (!_authInstance) {
       throw new Error('Firebase Auth is not available');
