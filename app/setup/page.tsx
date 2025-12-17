@@ -13,6 +13,7 @@ export default function SetupPage() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState(false);
+  const [firebaseConfigured, setFirebaseConfigured] = useState<boolean | null>(null);
   const [formData, setFormData] = useState<UserCreateData>({
     email: '',
     password: '',
@@ -29,6 +30,29 @@ export default function SetupPage() {
 
   const checkForAdmin = async () => {
     try {
+      // Check if Firebase is configured by checking for required env vars
+      const requiredVars = [
+        'NEXT_PUBLIC_FIREBASE_API_KEY',
+        'NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN',
+        'NEXT_PUBLIC_FIREBASE_PROJECT_ID',
+      ];
+      
+      const missingVars = requiredVars.filter(
+        (varName) => !process.env[varName] || process.env[varName] === ''
+      );
+      
+      if (missingVars.length > 0) {
+        // Firebase not configured - allow setup to proceed but show warning
+        console.warn('Firebase environment variables not configured:', missingVars);
+        setFirebaseConfigured(false);
+        setHasAdmin(false);
+        setChecking(false);
+        return;
+      }
+      
+      // Firebase appears to be configured
+      setFirebaseConfigured(true);
+
       // Try to get users - this might fail if Firestore rules require auth
       // In that case, we'll allow setup to proceed
       const users = await getAllUsers();
@@ -43,7 +67,7 @@ export default function SetupPage() {
       }
     } catch (err) {
       console.error('Error checking for admin (this is OK for initial setup):', err);
-      // If error (e.g., Firestore rules require auth, or no users collection exists yet),
+      // If error (e.g., Firestore not initialized, rules require auth, or no users collection exists yet),
       // allow setup to proceed - this is expected for initial setup
       setHasAdmin(false);
     } finally {
@@ -206,6 +230,29 @@ export default function SetupPage() {
           </div>
         </form>
 
+        {firebaseConfigured === false && (
+          <div className="mt-6 p-4 bg-yellow-50 border border-yellow-300 rounded-lg">
+            <p className="text-sm text-yellow-800 font-semibold mb-2">
+              ⚠️ Firebase Configuration Required
+            </p>
+            <p className="text-sm text-yellow-700">
+              Firebase environment variables are not configured. Please add the following environment variables:
+            </p>
+            <ul className="text-sm text-yellow-700 list-disc list-inside mt-2 space-y-1">
+              <li>NEXT_PUBLIC_FIREBASE_API_KEY</li>
+              <li>NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN</li>
+              <li>NEXT_PUBLIC_FIREBASE_PROJECT_ID</li>
+              <li>NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET</li>
+              <li>NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID</li>
+              <li>NEXT_PUBLIC_FIREBASE_APP_ID</li>
+            </ul>
+            <p className="text-sm text-yellow-700 mt-2">
+              For local development, add them to <code className="bg-yellow-100 px-1 rounded">.env.local</code>. 
+              For deployment, add them to your platform's environment variables.
+            </p>
+          </div>
+        )}
+        
         <div className="mt-6 p-4 bg-blue-50 rounded-lg">
           <p className="text-sm text-blue-800">
             <strong>Note:</strong> This page will only be accessible if no admin users exist. 
