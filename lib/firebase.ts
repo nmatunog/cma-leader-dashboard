@@ -148,7 +148,7 @@ export const auth = (() => {
     if (typeof window !== 'undefined') {
       return new Proxy({} as Auth, {
         get() {
-          throw new Error(`Firebase Auth is not available. Please check Firebase environment variables in Netlify and trigger a new deployment. Error: ${error instanceof Error ? error.message : 'Unknown error'}`);
+          throw new Error(`Firebase Auth is not available. Please check Firebase environment variables in your .env.local file (for local development) or deployment platform settings (for production). Restart the dev server after updating .env.local. Error: ${error instanceof Error ? error.message : 'Unknown error'}`);
         }
       });
     }
@@ -166,7 +166,7 @@ export const db = (() => {
       // On client-side, if Firebase isn't configured, create a proxy that throws helpful errors when used
       return new Proxy({} as Firestore, {
         get() {
-          throw new Error('Firebase is not initialized. Please check Firebase environment variables in Netlify settings and trigger a new deployment after adding them.');
+          throw new Error('Firebase is not initialized. Please check Firebase environment variables in your .env.local file (for local development) or deployment platform settings (for production). Restart the dev server after updating .env.local.');
         }
       });
     }
@@ -179,7 +179,7 @@ export const db = (() => {
       // Return proxy that throws helpful error on client-side
       return new Proxy({} as Firestore, {
         get() {
-          throw new Error(`Firebase is not available. Please check Firebase environment variables in Netlify and trigger a new deployment. Error: ${error instanceof Error ? error.message : 'Unknown error'}`);
+          throw new Error(`Firebase is not available. Please check Firebase environment variables in your .env.local file (for local development) or deployment platform settings (for production). Restart the dev server after updating .env.local. Error: ${error instanceof Error ? error.message : 'Unknown error'}`);
         }
       });
     }
