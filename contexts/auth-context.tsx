@@ -1,15 +1,15 @@
 'use client';
 
 import { createContext, useContext, useEffect, useState, ReactNode } from 'react';
-import { User as FirebaseUser, onAuthStateChanged } from 'firebase/auth';
-// Don't import Firebase-dependent modules at top level - use dynamic imports to avoid SSR issues
+// Don't import Firebase modules at top level - use dynamic imports to avoid SSR issues
+// import { User as FirebaseUser, onAuthStateChanged } from 'firebase/auth';
 // import { auth } from '@/lib/firebase';
 // import { getCurrentUser } from '@/lib/auth-service';
 import type { User } from '@/types/user';
 
 interface AuthContextType {
   user: User | null;
-  firebaseUser: FirebaseUser | null;
+  firebaseUser: any | null; // FirebaseUser type, but using any to avoid importing firebase/auth at top level
   loading: boolean;
   refreshUser: () => Promise<void>;
 }
@@ -35,7 +35,7 @@ interface AuthProviderProps {
 
 export function AuthProvider({ children }: AuthProviderProps) {
   const [user, setUser] = useState<User | null>(null);
-  const [firebaseUser, setFirebaseUser] = useState<FirebaseUser | null>(null);
+  const [firebaseUser, setFirebaseUser] = useState<any | null>(null); // Using any to avoid importing FirebaseUser at top level
   const [loading, setLoading] = useState(true);
 
   const refreshUser = async () => {
@@ -50,12 +50,17 @@ export function AuthProvider({ children }: AuthProviderProps) {
   };
 
   useEffect(() => {
-    // Dynamically import auth to avoid SSR issues with Firebase initialization
+    // Dynamically import all Firebase modules to avoid SSR issues
     let unsubscribe: (() => void) | null = null;
     
     const initAuthListener = async () => {
       try {
-        const { auth } = await import('@/lib/firebase');
+        // Dynamically import Firebase Auth and auth instance
+        const [{ onAuthStateChanged }, { auth }] = await Promise.all([
+          import('firebase/auth'),
+          import('@/lib/firebase')
+        ]);
+        
         unsubscribe = onAuthStateChanged(auth, async (firebaseAuthUser) => {
       setFirebaseUser(firebaseAuthUser);
       
