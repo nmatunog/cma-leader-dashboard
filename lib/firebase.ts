@@ -156,34 +156,30 @@ export const auth = (() => {
   }
 })();
 
-// Export db - initialized lazily, won't throw on client-side if Firebase isn't configured
+// Export db - initialized lazily, won't throw on module load if Firebase isn't configured
 // The service layer will catch errors when db is actually used
 let _dbInstance: Firestore | null = null;
 export const db = (() => {
   try {
     _dbInstance = getFirestoreDB();
-    if (!_dbInstance && typeof window !== 'undefined') {
-      // On client-side, if Firebase isn't configured, create a proxy that throws helpful errors when used
+    if (!_dbInstance) {
+      // If Firebase isn't configured, return a proxy that throws helpful errors when used
+      // This prevents throwing during module initialization (which causes 500 errors)
       return new Proxy({} as Firestore, {
         get() {
           throw new Error('Firebase is not initialized. Please check Firebase environment variables in your .env.local file (for local development) or deployment platform settings (for production). Restart the dev server after updating .env.local.');
         }
       });
     }
-    if (!_dbInstance) {
-      throw new Error('Firestore is not available');
-    }
     return _dbInstance;
   } catch (error) {
-    if (typeof window !== 'undefined') {
-      // Return proxy that throws helpful error on client-side
-      return new Proxy({} as Firestore, {
-        get() {
-          throw new Error(`Firebase is not available. Please check Firebase environment variables in your .env.local file (for local development) or deployment platform settings (for production). Restart the dev server after updating .env.local. Error: ${error instanceof Error ? error.message : 'Unknown error'}`);
-        }
-      });
-    }
-    throw error;
+    // Return proxy instead of throwing - prevents server-side crashes
+    // Service layer will catch errors when db is actually used
+    return new Proxy({} as Firestore, {
+      get() {
+        throw new Error(`Firebase is not available. Please check Firebase environment variables in your .env.local file (for local development) or deployment platform settings (for production). Restart the dev server after updating .env.local. Error: ${error instanceof Error ? error.message : 'Unknown error'}`);
+      }
+    });
   }
 })();
 
