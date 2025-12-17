@@ -50,8 +50,9 @@ const nextConfig: NextConfig = {
   },
   
   // Output configuration
-  // For Netlify, Next.js handles this automatically via @netlify/plugin-nextjs
-  // output: 'standalone', // Only needed for self-hosted deployments
+  // For Vercel: No configuration needed, works out of the box
+  // For Firebase Hosting + Cloud Run: May need 'standalone' output
+  // output: 'standalone', // Only needed for self-hosted or Firebase Cloud Run deployments
 };
 
 export default nextConfig;
