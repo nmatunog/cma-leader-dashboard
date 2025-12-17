@@ -2,8 +2,8 @@
 
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
-import { registerUser } from '@/lib/auth-service';
-import { getAllUsers } from '@/lib/user-service';
+// Use dynamic imports to avoid SSR issues with Firebase initialization
+// import { registerUser } from '@/lib/auth-service';
 import type { UserCreateData } from '@/types/user';
 
 export default function SetupPage() {
@@ -54,15 +54,18 @@ export default function SetupPage() {
       setFirebaseConfigured(true);
 
       // Try to get users - this might fail if Firestore rules require auth or Firebase isn't initialized
-      // In that case, we'll allow setup to proceed
+      // Use dynamic import to avoid SSR issues with Firebase initialization
+      let adminExists = false;
       try {
+        const { getAllUsers } = await import('@/lib/user-service');
         const users = await getAllUsers();
-        const adminExists = users.some(user => user.role === 'admin' && user.isActive);
+        adminExists = users.some(user => user.role === 'admin' && user.isActive);
         setHasAdmin(adminExists);
       } catch (fetchError) {
         // If getAllUsers fails (e.g., Firestore not initialized), allow setup to proceed
         console.warn('Could not check for existing admin users:', fetchError);
         setHasAdmin(false);
+        adminExists = false;
       }
       
       if (adminExists) {
@@ -101,6 +104,8 @@ export default function SetupPage() {
     }
 
     try {
+      // Dynamically import registerUser to avoid SSR issues with Firebase
+      const { registerUser } = await import('@/lib/auth-service');
       // Create admin user with 'system' as createdBy since this is initial setup
       const result = await registerUser(formData, 'system');
       

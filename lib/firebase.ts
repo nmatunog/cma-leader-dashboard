@@ -35,24 +35,12 @@ function getFirebaseApp(): FirebaseApp {
     );
     
     if (missingVars.length > 0) {
-      // Only throw error on server-side (build time)
-      // On client-side, log warning but allow graceful degradation
-      if (typeof window === 'undefined') {
-        console.error(
-          `Missing required Firebase environment variables: ${missingVars.join(', ')}`
-        );
-        throw new Error(
-          `Firebase configuration incomplete. Missing: ${missingVars.join(', ')}`
-        );
-      } else {
-        // Client-side: log warning but don't throw (allows app to load)
-        console.warn(
-          `Missing required Firebase environment variables: ${missingVars.join(', ')}. Firebase features may not work.`
-        );
-        // Don't initialize Firebase if config is incomplete
-        // Return a mock app instance that will fail gracefully on operations
-        return null as any;
-      }
+      // Don't throw - return null to allow graceful degradation
+      // This prevents server-side 500 errors when Firebase isn't configured yet
+      console.warn(
+        `Missing required Firebase environment variables: ${missingVars.join(', ')}. Firebase features may not work.`
+      );
+      return null as any;
     }
 
     if (!getApps().length) {
@@ -60,9 +48,7 @@ function getFirebaseApp(): FirebaseApp {
         app = initializeApp(firebaseConfig);
       } catch (error) {
         console.error('Failed to initialize Firebase:', error);
-        if (typeof window === 'undefined') {
-          throw error;
-        }
+        // Return null instead of throwing - allows graceful degradation
         return null as any;
       }
     } else {
@@ -76,21 +62,15 @@ function getFirestoreDB(): Firestore | null {
   if (!dbInstance) {
     const firebaseApp = getFirebaseApp();
     if (!firebaseApp) {
-      // On client-side, return null instead of throwing to allow app to load
-      if (typeof window !== 'undefined') {
-        return null;
-      }
-      // Server-side should throw
-      throw new Error('Firebase is not initialized. Please check environment variables.');
+      // Return null instead of throwing - allows graceful degradation
+      return null;
     }
     try {
       dbInstance = getFirestore(firebaseApp);
     } catch (error) {
       console.error('Failed to get Firestore instance:', error);
-      if (typeof window !== 'undefined') {
-        return null;
-      }
-      throw new Error('Failed to initialize Firestore. Please check Firebase configuration.');
+      // Return null instead of throwing - allows graceful degradation
+      return null;
     }
   }
   return dbInstance;
@@ -102,57 +82,49 @@ function getFirebaseAuth(): Auth | null {
     if (!authInstance) {
       const firebaseApp = getFirebaseApp();
       if (!firebaseApp) {
-        if (typeof window !== 'undefined') {
-          return null;
-        }
-        throw new Error('Firebase is not initialized. Please check environment variables.');
+        // Return null instead of throwing - allows graceful degradation
+        return null;
       }
       try {
         authInstance = getAuth(firebaseApp);
       } catch (error) {
         console.error('Failed to get Firebase Auth instance:', error);
-        if (typeof window !== 'undefined') {
-          return null;
-        }
-        throw new Error('Failed to initialize Firebase Auth. Please check Firebase configuration.');
+        // Return null instead of throwing - allows graceful degradation
+        return null;
       }
     }
     return authInstance;
   } catch (error) {
-    if (typeof window !== 'undefined') {
-      console.warn('Firebase Auth initialization failed:', error);
-      return null;
-    }
-    throw error;
+    console.warn('Firebase Auth initialization failed:', error);
+    // Return null instead of throwing - allows graceful degradation
+    return null;
   }
 }
 
-// Export auth - initialized lazily
+// Export auth - initialized lazily, won't throw on module load if Firebase isn't configured
+// The service layer will catch errors when auth is actually used
 let _authInstance: Auth | null = null;
 export const auth = (() => {
   try {
     _authInstance = getFirebaseAuth();
-    if (!_authInstance && typeof window !== 'undefined') {
-      // Return proxy that throws helpful error on client-side when used
-        return new Proxy({} as Auth, {
-                        get() {
-                            throw new Error('Firebase Auth is not initialized. Please check Firebase environment variables in your .env.local file (for local development) or deployment platform settings (for production). Restart the dev server after updating .env.local.');
-                        }
-                    });
-    }
     if (!_authInstance) {
-      throw new Error('Firebase Auth is not available');
-    }
-    return _authInstance;
-  } catch (error) {
-    if (typeof window !== 'undefined') {
+      // If Firebase isn't configured, return a proxy that throws helpful errors when used
+      // This prevents throwing during module initialization (which causes 500 errors)
       return new Proxy({} as Auth, {
         get() {
-          throw new Error(`Firebase Auth is not available. Please check Firebase environment variables in your .env.local file (for local development) or deployment platform settings (for production). Restart the dev server after updating .env.local. Error: ${error instanceof Error ? error.message : 'Unknown error'}`);
+          throw new Error('Firebase Auth is not initialized. Please check Firebase environment variables in your .env.local file (for local development) or deployment platform settings (for production). Restart the dev server after updating .env.local.');
         }
       });
     }
-    throw error;
+    return _authInstance;
+  } catch (error) {
+    // Return proxy instead of throwing - prevents server-side crashes
+    // Service layer will catch errors when auth is actually used
+    return new Proxy({} as Auth, {
+      get() {
+        throw new Error(`Firebase Auth is not available. Please check Firebase environment variables in your .env.local file (for local development) or deployment platform settings (for production). Restart the dev server after updating .env.local. Error: ${error instanceof Error ? error.message : 'Unknown error'}`);
+      }
+    });
   }
 })();
 

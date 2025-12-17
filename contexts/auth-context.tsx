@@ -48,7 +48,12 @@ export function AuthProvider({ children }: AuthProviderProps) {
   };
 
   useEffect(() => {
-    const unsubscribe = onAuthStateChanged(auth, async (firebaseAuthUser) => {
+    // Wrap auth state listener in try-catch to handle cases where Firebase isn't configured
+    // This prevents errors when Firebase env vars aren't available yet
+    let unsubscribe: (() => void) | null = null;
+    
+    try {
+      unsubscribe = onAuthStateChanged(auth, async (firebaseAuthUser) => {
       setFirebaseUser(firebaseAuthUser);
       
       if (firebaseAuthUser) {
@@ -66,9 +71,18 @@ export function AuthProvider({ children }: AuthProviderProps) {
       }
       
       setLoading(false);
-    });
+        });
+      }
+    } catch (error) {
+      console.warn('Firebase Auth not available, skipping auth state listener:', error);
+      setLoading(false);
+    }
 
-    return () => unsubscribe();
+    return () => {
+      if (unsubscribe) {
+        unsubscribe();
+      }
+    };
   }, []);
 
   const value = {
