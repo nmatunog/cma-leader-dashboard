@@ -53,11 +53,17 @@ export default function SetupPage() {
       // Firebase appears to be configured
       setFirebaseConfigured(true);
 
-      // Try to get users - this might fail if Firestore rules require auth
+      // Try to get users - this might fail if Firestore rules require auth or Firebase isn't initialized
       // In that case, we'll allow setup to proceed
-      const users = await getAllUsers();
-      const adminExists = users.some(user => user.role === 'admin' && user.isActive);
-      setHasAdmin(adminExists);
+      try {
+        const users = await getAllUsers();
+        const adminExists = users.some(user => user.role === 'admin' && user.isActive);
+        setHasAdmin(adminExists);
+      } catch (fetchError) {
+        // If getAllUsers fails (e.g., Firestore not initialized), allow setup to proceed
+        console.warn('Could not check for existing admin users:', fetchError);
+        setHasAdmin(false);
+      }
       
       if (adminExists) {
         // If admin exists, redirect to login

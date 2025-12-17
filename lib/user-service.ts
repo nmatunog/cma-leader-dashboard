@@ -28,6 +28,12 @@ const USERS_COLLECTION = 'users';
  */
 export async function getAllUsers(): Promise<User[]> {
   try {
+    // Check if db is available (Firebase initialized)
+    if (!db) {
+      console.warn('Firestore db is not available');
+      return [];
+    }
+    
     const q = query(
       collection(db, USERS_COLLECTION),
       orderBy('createdAt', 'desc')
@@ -47,7 +53,9 @@ export async function getAllUsers(): Promise<User[]> {
     return users;
   } catch (error) {
     console.error('Error getting all users:', error);
-    throw error;
+    // Return empty array instead of throwing - allows setup page to proceed
+    // This is expected when Firebase isn't configured or Firestore rules don't allow access
+    return [];
   }
 }
 
