@@ -1,10 +1,11 @@
 'use client';
 
 import { useState, useEffect } from 'react';
+import { useRouter } from 'next/navigation';
 import { Sidebar } from '@/components/sidebar';
 import { getAllGoals, getAgencyGoals, type StrategicPlanningGoal } from '@/services/strategic-planning-service';
 import { formatNumberWithCommas } from '@/components/strategic-planning/utils/number-format';
-import { isAdmin } from '@/lib/admin-config';
+import { useAuth } from '@/contexts/auth-context';
 
 interface AggregatedData {
   totalUsers: number;
@@ -30,6 +31,8 @@ interface AggregatedData {
 }
 
 export default function ReportsPage() {
+  const router = useRouter();
+  const { user, loading: authLoading } = useAuth();
   const [goals, setGoals] = useState<StrategicPlanningGoal[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -37,21 +40,17 @@ export default function ReportsPage() {
   const [filterRank, setFilterRank] = useState<string>('all');
   const [aggregated, setAggregated] = useState<AggregatedData | null>(null);
   const [selectedGoal, setSelectedGoal] = useState<StrategicPlanningGoal | null>(null);
-  const [isAuthorized, setIsAuthorized] = useState(false);
 
+  // Check if user is admin
   useEffect(() => {
-    // Check admin authorization
-    if (typeof window !== 'undefined') {
-      const userRole = localStorage.getItem('sp_user_role');
-      if (userRole === 'admin' || isAdmin()) {
-        setIsAuthorized(true);
-        loadGoals();
+    if (!authLoading) {
+      if (!user || user.role !== 'admin') {
+        router.push('/login');
       } else {
-        setIsAuthorized(false);
-        setLoading(false);
+        loadGoals();
       }
     }
-  }, []);
+  }, [user, authLoading, router]);
 
   useEffect(() => {
     if (goals.length > 0) {
@@ -212,33 +211,26 @@ export default function ReportsPage() {
     document.body.removeChild(link);
   };
 
-  // Show unauthorized message if not admin
-  if (!isAuthorized) {
+  // Show loading state while checking auth
+  if (authLoading || (loading && !error)) {
     return (
       <div className="flex h-full min-h-screen">
         <Sidebar />
         <main className="flex-1 overflow-y-auto bg-gradient-to-br from-white via-blue-50/30 to-purple-50/20 p-4 sm:p-6 md:p-8">
           <div className="mx-auto max-w-7xl">
-            <div className="bg-white rounded-xl shadow-lg p-8 border-l-4 border-red-500 text-center">
-              <div className="text-5xl mb-4">🔒</div>
-              <h2 className="text-2xl font-bold text-slate-900 mb-2">Admin Access Required</h2>
-              <p className="text-slate-600 mb-4">
-                This page is restricted to administrators only. Please log in with admin credentials.
-              </p>
-              <button
-                onClick={() => {
-                  localStorage.removeItem('sp_user_role');
-                  window.location.href = '/strategic-planning';
-                }}
-                className="px-6 py-3 bg-gradient-to-r from-[#D31145] to-red-600 text-white font-bold rounded-lg hover:from-red-600 hover:to-red-700 transition-all shadow-md hover:shadow-lg"
-              >
-                Go to Login
-              </button>
+            <div className="text-center py-12">
+              <div className="inline-block animate-spin rounded-full h-12 w-12 border-b-2 border-[#D31145]"></div>
+              <p className="mt-4 text-slate-600">Loading...</p>
             </div>
           </div>
         </main>
       </div>
     );
+  }
+
+  // If not admin, show nothing (will redirect)
+  if (!user || user.role !== 'admin') {
+    return null;
   }
 
   return (
