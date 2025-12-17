@@ -50,6 +50,12 @@ export function AuthProvider({ children }: AuthProviderProps) {
   };
 
   useEffect(() => {
+    // Skip initialization during SSR - only run on client
+    if (typeof window === 'undefined') {
+      setLoading(false);
+      return;
+    }
+
     // Dynamically import all Firebase modules to avoid SSR issues
     let unsubscribe: (() => void) | null = null;
     
