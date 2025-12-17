@@ -2,8 +2,9 @@
 
 import { createContext, useContext, useEffect, useState, ReactNode } from 'react';
 import { User as FirebaseUser, onAuthStateChanged } from 'firebase/auth';
-import { auth } from '@/lib/firebase';
-import { getCurrentUser } from '@/lib/auth-service';
+// Don't import Firebase-dependent modules at top level - use dynamic imports to avoid SSR issues
+// import { auth } from '@/lib/firebase';
+// import { getCurrentUser } from '@/lib/auth-service';
 import type { User } from '@/types/user';
 
 interface AuthContextType {
@@ -39,6 +40,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
 
   const refreshUser = async () => {
     try {
+      const { getCurrentUser } = await import('@/lib/auth-service');
       const currentUser = await getCurrentUser();
       setUser(currentUser);
     } catch (error) {
@@ -48,17 +50,19 @@ export function AuthProvider({ children }: AuthProviderProps) {
   };
 
   useEffect(() => {
-    // Wrap auth state listener in try-catch to handle cases where Firebase isn't configured
-    // This prevents errors when Firebase env vars aren't available yet
+    // Dynamically import auth to avoid SSR issues with Firebase initialization
     let unsubscribe: (() => void) | null = null;
     
-    try {
-      unsubscribe = onAuthStateChanged(auth, async (firebaseAuthUser) => {
+    const initAuthListener = async () => {
+      try {
+        const { auth } = await import('@/lib/firebase');
+        unsubscribe = onAuthStateChanged(auth, async (firebaseAuthUser) => {
       setFirebaseUser(firebaseAuthUser);
       
       if (firebaseAuthUser) {
         // User is signed in, get their data from Firestore
         try {
+          const { getCurrentUser } = await import('@/lib/auth-service');
           const userData = await getCurrentUser();
           setUser(userData);
         } catch (error) {
@@ -72,11 +76,13 @@ export function AuthProvider({ children }: AuthProviderProps) {
       
       setLoading(false);
         });
+      } catch (error) {
+        console.warn('Firebase Auth not available, skipping auth state listener:', error);
+        setLoading(false);
       }
-    } catch (error) {
-      console.warn('Firebase Auth not available, skipping auth state listener:', error);
-      setLoading(false);
-    }
+    };
+
+    initAuthListener();
 
     return () => {
       if (unsubscribe) {
