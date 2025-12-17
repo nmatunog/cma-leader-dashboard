@@ -13,8 +13,7 @@
     "lint:fix": "eslint --fix",
     "type-check": "tsc --noEmit",
     "verify-env": "node scripts/verify-env.js",
-    "prebuild": "npm run type-check && npm run verify-env",
-    "netlify-build": "npm run build"
+    "prebuild": "npm run type-check && npm run verify-env"
   },
   "dependencies": {
     "@radix-ui/react-dialog": "^1.1.15",
