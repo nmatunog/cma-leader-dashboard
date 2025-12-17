@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { LoginModal } from './login-modal';
+import { useRouter } from 'next/navigation';
 import { AIModal } from './ai-modal';
 import { TabNavigation } from './tab-navigation';
 import { OverviewTab } from './tabs/overview-tab';
@@ -9,7 +9,9 @@ import { AdvisorSimTab } from './tabs/advisor-sim-tab';
 import { LeaderHQTab } from './tabs/leader-hq-tab';
 import { PathToPremierTab } from './tabs/path-to-premier-tab';
 import { GoalSettingTab } from './tabs/goal-setting-tab';
-import { signOutAuth, isAuthenticated } from '@/lib/auth';
+import { useAuth } from '@/contexts/auth-context';
+import { signOutUser } from '@/lib/auth-service';
+import { getUserPermissions } from '@/lib/user-service';
 
 export interface UserState {
   role: 'advisor' | 'leader' | 'admin';
@@ -17,139 +19,67 @@ export interface UserState {
   name: string;
   um: string;
   agency: string;
+  uid: string;
 }
 
 export function StrategicPlanningApp() {
-  const [userState, setUserState] = useState<UserState>({
-    role: 'advisor',
-    rank: 'LA',
-    name: '',
-    um: '',
-    agency: '',
-  });
-  const [originalRank, setOriginalRank] = useState<string>('LA'); // Store original login rank
+  const router = useRouter();
+  const { user, loading } = useAuth();
+  const [userState, setUserState] = useState<UserState | null>(null);
   const [activeTab, setActiveTab] = useState('overview');
-  const [showLogin, setShowLogin] = useState(true);
-  const [isMounted, setIsMounted] = useState(false);
   const [showAIModal, setShowAIModal] = useState(false);
   const [aiModalContent, setAIModalContent] = useState('');
   const [aiModalTitle, setAIModalTitle] = useState('AI Assistant');
 
+  // Update user state when auth user changes
   useEffect(() => {
-    // Mark as mounted to avoid hydration issues
-    setIsMounted(true);
-    
-    // Check if user is already logged in (from localStorage) - only on client side
-    if (typeof window === 'undefined') {
-      return;
-    }
-    
-    // Check Firebase Auth state - if not authenticated, show login
-    const authenticated = isAuthenticated();
-    
-    const savedName = localStorage.getItem('sp_user_name');
-    const savedRole = localStorage.getItem('sp_user_role') as 'advisor' | 'leader' | 'admin' | null;
-    const savedRank = localStorage.getItem('sp_user_rank') as string | null;
-    
-    // Only auto-login if we have valid saved data AND Firebase Auth is authenticated
-    if (authenticated && savedName && savedName.trim() && savedRole && (savedRole === 'advisor' || savedRole === 'leader' || savedRole === 'admin')) {
-      let rank = savedRank || 'LA';
-      if (savedRole === 'leader') rank = 'UM';
-      else if (savedRole === 'admin') rank = 'ADMIN';
-      
-      setOriginalRank(rank);
-      setUserState({
-        role: savedRole,
-        rank: rank,
-        name: savedName,
-        um: localStorage.getItem('sp_user_um') || (savedRole === 'admin' ? 'System' : 'Cebu Matunog Agency'),
-        agency: localStorage.getItem('sp_user_agency') || (savedRole === 'admin' ? 'All Agencies' : 'Cebu Matunog Agency'),
-      });
-      setShowLogin(false);
-      
-      // If admin, redirect to reports page
-      if (savedRole === 'admin') {
-        window.location.href = '/reports';
+    if (!loading) {
+      if (!user) {
+        // Not authenticated, redirect to login
+        router.push('/login');
+        return;
       }
-    } else {
-      // If not authenticated or no saved data, show login
-      // Also clear localStorage if Firebase Auth is not authenticated
-      if (!authenticated) {
-        localStorage.removeItem('sp_user_name');
-        localStorage.removeItem('sp_user_role');
-        localStorage.removeItem('sp_user_rank');
-        localStorage.removeItem('sp_user_um');
-        localStorage.removeItem('sp_user_agency');
-      }
-      setShowLogin(true);
-    }
-  }, []);
 
-  const handleLogin = (role: 'advisor' | 'leader' | 'admin', name: string, um: string, agency: string) => {
-    let rank = 'LA';
-    if (role === 'leader') {
-      rank = 'UM';
-    } else if (role === 'admin') {
-      rank = 'ADMIN';
+      // Check if admin - redirect to reports
+      if (user.role === 'admin') {
+        router.push('/reports');
+        return;
+      }
+
+      // Set user state from authenticated user
+      setUserState({
+        role: user.role,
+        rank: user.rank,
+        name: user.name,
+        um: user.unitManager || 'System',
+        agency: user.agencyName,
+        uid: user.uid,
+      });
     }
-    
-    setOriginalRank(rank); // Store original rank from login
-    const newState: UserState = {
-      role,
-      rank: rank,
-      name,
-      um: um || 'System',
-      agency: agency || 'All Agencies',
-    };
-    setUserState(newState);
-    setShowLogin(false);
-    
-    // Save to localStorage
-    localStorage.setItem('sp_user_name', name);
-    localStorage.setItem('sp_user_role', role);
-    localStorage.setItem('sp_user_rank', rank); // Save original rank
-    localStorage.setItem('sp_user_um', um || 'System');
-    localStorage.setItem('sp_user_agency', agency || 'All Agencies');
-    
-    // If admin, redirect to reports page
-    if (role === 'admin') {
-      window.location.href = '/reports';
+  }, [user, loading, router]);
+
+  // Redirect Life Advisors away from leader-only tabs
+  useEffect(() => {
+    if (userState && user && user.rank === 'LA' && (activeTab === 'leader' || activeTab === 'growth')) {
+      setActiveTab('overview');
     }
-  };
+  }, [userState, user, activeTab]);
 
   const handleLogout = async () => {
     try {
-      // Sign out from Firebase Auth
-      await signOutAuth();
+      await signOutUser();
+      router.push('/login');
     } catch (error) {
-      console.error('Error signing out from Firebase:', error);
-      // Continue with logout even if Firebase sign out fails
+      console.error('Error signing out:', error);
+      // Still redirect to login even if sign out fails
+      router.push('/login');
     }
-    
-    // Clear localStorage
-    localStorage.removeItem('sp_user_name');
-    localStorage.removeItem('sp_user_role');
-    localStorage.removeItem('sp_user_rank');
-    localStorage.removeItem('sp_user_um');
-    localStorage.removeItem('sp_user_agency');
-    
-    // Reset state
-    setShowLogin(true);
-    setOriginalRank('LA');
-    setUserState({
-      role: 'advisor',
-      rank: 'LA',
-      name: '',
-      um: '',
-      agency: '',
-    });
-    setActiveTab('overview');
   };
 
   const clearData = () => {
     if (confirm('Reset all strategic planning data?')) {
-      // Only clear strategic planning specific data
-      const keys = Object.keys(localStorage).filter(key => key.startsWith('sp_'));
+      // Only clear strategic planning specific data from localStorage
+      const keys = Object.keys(localStorage).filter(key => key.startsWith('sp_') || key.startsWith('advisor_sim_'));
       keys.forEach(key => localStorage.removeItem(key));
       window.location.reload();
     }
@@ -161,39 +91,36 @@ export function StrategicPlanningApp() {
     setShowAIModal(true);
   };
 
+  // Show loading state while checking auth
+  if (loading) {
+    return (
+      <div className="flex h-screen items-center justify-center">
+        <div className="text-xl">Loading...</div>
+      </div>
+    );
+  }
+
+  // If no user (will redirect), show nothing
+  if (!userState || !user) {
+    return null;
+  }
+
+  // Get user permissions
+  const permissions = getUserPermissions(user.role);
+  const canToggleToLeader = permissions.canToggleLeaderView && user.rank !== 'LA';
+
+  // Toggle between advisor and leader view (only for leaders/admins)
   const toggleRole = () => {
-    // Only allow role toggle if user's original rank is Leader (UM), not Life Advisor (LA)
-    // Leaders can view both Advisor and Leader views
-    if (originalRank === 'LA') {
-      // Life Advisors cannot switch to leader view
+    if (!userState || !permissions.canToggleLeaderView || user.rank === 'LA') {
       return;
     }
     
-    // Toggle view role only, keep original rank
-    setUserState(prev => ({
-      ...prev,
-      role: prev.role === 'advisor' ? 'leader' : 'advisor',
-      // Keep original rank, don't change it
-    }));
-    // Save updated view role (only for view toggle, not actual rank)
-    localStorage.setItem('sp_user_role', userState.role === 'advisor' ? 'leader' : 'advisor');
+    // Toggle view role, but keep original rank from user object
+    setUserState({
+      ...userState,
+      role: userState.role === 'advisor' ? 'leader' : 'advisor',
+    });
   };
-  
-  // Check if user can toggle to leader view (only Leaders can, not Life Advisors)
-  const canToggleToLeader = originalRank !== 'LA';
-  
-  // Redirect Life Advisors away from leader-only tabs
-  useEffect(() => {
-    if (!showLogin && originalRank === 'LA' && (activeTab === 'leader' || activeTab === 'growth')) {
-      setActiveTab('overview');
-    }
-  }, [showLogin, originalRank, activeTab]);
-
-  // Show login modal if showLogin is true
-  // During initial mount, show login by default to avoid hydration issues
-  if (!isMounted || showLogin) {
-    return <LoginModal onLogin={handleLogin} />;
-  }
 
   return (
     <>
@@ -254,7 +181,7 @@ export function StrategicPlanningApp() {
         activeTab={activeTab}
         onTabChange={setActiveTab}
         isLeader={userState.role === 'leader'}
-        canAccessLeaderTabs={originalRank === 'UM'}
+        canAccessLeaderTabs={permissions.canAccessLeaderTabs}
       />
       
       <div className="mt-6">
@@ -274,4 +201,3 @@ export function StrategicPlanningApp() {
     </>
   );
 }
-

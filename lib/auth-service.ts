@@ -245,3 +245,4 @@ export function getFirebaseUser(): FirebaseUser | null {
   return auth.currentUser;
 }
 
+

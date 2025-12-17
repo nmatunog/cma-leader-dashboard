@@ -5,7 +5,7 @@ const GOALS_COLLECTION = 'strategic_planning_goals';
 
 export interface StrategicPlanningGoal {
   id?: string;
-  userId: string; // User's name or unique identifier
+  userId: string; // User's UID (unique identifier from Firebase Auth)
   userName: string;
   userRank: string; // LA, UM, SUM, AD
   unitManager: string;

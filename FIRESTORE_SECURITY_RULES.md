@@ -118,3 +118,4 @@ After publishing rules, test:
 3. Login as advisor - should access own goals, advisor tabs only
 4. Try accessing other users' goals - should be denied (unless admin)
 
+

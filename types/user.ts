@@ -63,3 +63,4 @@ export interface UserPermissions {
   canViewAllAgencies: boolean;
 }
 
+

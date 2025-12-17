@@ -75,3 +75,4 @@ NEXT_PUBLIC_FIREBASE_API_KEY = "your-key-here"
 But the proper way is to have them in Netlify UI Environment Variables.
 
 
+

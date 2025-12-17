@@ -552,7 +552,7 @@ export function GoalSettingTab({ userState, onShowAI }: GoalSettingTabProps) {
       
       // Prepare goal data
       const goalData: StrategicPlanningGoal = {
-        userId: userState.name,
+        userId: userState.uid, // Use UID instead of name for unique identification
         userName: userState.name,
         userRank: userState.rank,
         unitManager: userState.um,
