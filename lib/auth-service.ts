@@ -66,9 +66,23 @@ export async function registerUser(userData: UserCreateData, createdBy: string):
     return { success: true, user: newUser };
   } catch (error) {
     console.error('Error registering user:', error);
+    let errorMessage = 'Failed to register user';
+    
+    if (error instanceof Error) {
+      if (error.message.includes('email-already-in-use')) {
+        errorMessage = 'An account with this email already exists. Please try logging in instead, or use a different email address.';
+      } else if (error.message.includes('weak-password')) {
+        errorMessage = 'Password is too weak. Please use a stronger password (at least 6 characters).';
+      } else if (error.message.includes('invalid-email')) {
+        errorMessage = 'Invalid email address. Please check your email and try again.';
+      } else {
+        errorMessage = error.message;
+      }
+    }
+    
     return {
       success: false,
-      error: error instanceof Error ? error.message : 'Failed to register user',
+      error: errorMessage,
     };
   }
 }

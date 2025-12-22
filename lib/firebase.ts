@@ -4,44 +4,42 @@ import { getAuth, Auth } from 'firebase/auth';
 
 let app: FirebaseApp | null = null;
 let dbInstance: Firestore | null = null;
-let authInstance: Auth | null = null;
+let _authInstance: Auth | null = null;
 
 // Lazy initialize Firebase
 function getFirebaseApp(): FirebaseApp {
   if (!app) {
-    const firebaseConfig = {
-      apiKey: process.env.NEXT_PUBLIC_FIREBASE_API_KEY,
-      authDomain: process.env.NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN,
-      projectId: process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID,
-      storageBucket: process.env.NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET,
-      messagingSenderId: process.env.NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID,
-      appId: process.env.NEXT_PUBLIC_FIREBASE_APP_ID,
-      measurementId: process.env.NEXT_PUBLIC_FIREBASE_MEASUREMENT_ID,
-    };
+    // Skip initialization during SSR - environment variables may not be available
+    if (typeof window === 'undefined') {
+      return null as any;
+    }
 
-    // Validate required environment variables
-    // Check both server-side and client-side availability
-    const requiredVars = [
-      'NEXT_PUBLIC_FIREBASE_API_KEY',
-      'NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN',
-      'NEXT_PUBLIC_FIREBASE_PROJECT_ID',
-      'NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET',
-      'NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID',
-      'NEXT_PUBLIC_FIREBASE_APP_ID',
-    ];
-    
-    const missingVars = requiredVars.filter(
-      (varName) => !process.env[varName] || process.env[varName] === ''
-    );
-    
-    if (missingVars.length > 0) {
-      // Don't throw - return null to allow graceful degradation
-      // This prevents server-side 500 errors when Firebase isn't configured yet
+    // TypeScript now knows these exist, but we still need runtime checks
+    const apiKey = process.env.NEXT_PUBLIC_FIREBASE_API_KEY;
+    const authDomain = process.env.NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN;
+    const projectId = process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID;
+    const storageBucket = process.env.NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET;
+    const messagingSenderId = process.env.NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID;
+    const appId = process.env.NEXT_PUBLIC_FIREBASE_APP_ID;
+    const measurementId = process.env.NEXT_PUBLIC_FIREBASE_MEASUREMENT_ID;
+
+    // Validate required environment variables (client-side only)
+    if (!apiKey || !authDomain || !projectId || !storageBucket || !messagingSenderId || !appId) {
       console.warn(
-        `Missing required Firebase environment variables: ${missingVars.join(', ')}. Firebase features may not work.`
+        `Missing required Firebase environment variables. Firebase features may not work.`
       );
       return null as any;
     }
+
+    const firebaseConfig = {
+      apiKey,
+      authDomain,
+      projectId,
+      storageBucket,
+      messagingSenderId,
+      appId,
+      measurementId,
+    };
 
     if (!getApps().length) {
       try {
@@ -76,57 +74,47 @@ function getFirestoreDB(): Firestore | null {
   return dbInstance;
 }
 
-// Get Firebase Auth instance
-function getFirebaseAuth(): Auth | null {
+// Get Firebase Auth instance - checks env vars before initializing
+function getAuthInstance(): Auth | null {
+  // Only initialize on client side
+  if (typeof window === 'undefined') {
+    return null;
+  }
+  
+  // Check if environment variables are available
+  const apiKey = process.env.NEXT_PUBLIC_FIREBASE_API_KEY;
+  const authDomain = process.env.NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN;
+  const projectId = process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID;
+  
+  if (!apiKey || !authDomain || !projectId) {
+    return null;
+  }
+  
   try {
-    if (!authInstance) {
+    if (!_authInstance) {
       const firebaseApp = getFirebaseApp();
       if (!firebaseApp) {
-        // Return null instead of throwing - allows graceful degradation
         return null;
       }
-      try {
-        authInstance = getAuth(firebaseApp);
-      } catch (error) {
-        console.error('Failed to get Firebase Auth instance:', error);
-        // Return null instead of throwing - allows graceful degradation
-        return null;
-      }
+      _authInstance = getAuth(firebaseApp);
     }
-    return authInstance;
+    return _authInstance;
   } catch (error) {
     console.warn('Firebase Auth initialization failed:', error);
-    // Return null instead of throwing - allows graceful degradation
     return null;
   }
 }
 
-// Export auth - initialized lazily, won't throw on module load if Firebase isn't configured
-// The service layer will catch errors when auth is actually used
-let _authInstance: Auth | null = null;
-export const auth = (() => {
-  try {
-    _authInstance = getFirebaseAuth();
-    if (!_authInstance) {
-      // If Firebase isn't configured, return a proxy that throws helpful errors when used
-      // This prevents throwing during module initialization (which causes 500 errors)
-      return new Proxy({} as Auth, {
-        get() {
-          throw new Error('Firebase Auth is not initialized. Please check Firebase environment variables in your .env.local file (for local development) or deployment platform settings (for production). Restart the dev server after updating .env.local.');
-        }
-      });
+// Export auth as a getter that checks environment variables first
+export const auth = new Proxy({} as Auth, {
+  get(_target, prop) {
+    const instance = getAuthInstance();
+    if (!instance) {
+      throw new Error('Firebase Auth is not initialized. Please check Firebase environment variables in your .env.local file (for local development) or deployment platform settings (for production). Restart the dev server after updating .env.local.');
     }
-    return _authInstance;
-  } catch (error) {
-    // Return proxy instead of throwing - prevents server-side crashes
-    // Service layer will catch errors when auth is actually used
-    return new Proxy({} as Auth, {
-      get() {
-        throw new Error(`Firebase Auth is not available. Please check Firebase environment variables in your .env.local file (for local development) or deployment platform settings (for production). Restart the dev server after updating .env.local. Error: ${error instanceof Error ? error.message : 'Unknown error'}`);
-      }
-    });
+    return (instance as any)[prop];
   }
-})();
+});
 
 // Export db - initialized lazily, won't throw on module load if Firebase isn't configured
 // The service layer will catch errors when db is actually used

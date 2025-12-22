@@ -40,15 +40,10 @@ export function StrategicPlanningApp() {
         return;
       }
 
-      // Check if admin - redirect to reports
-      if (user.role === 'admin') {
-        router.push('/reports');
-        return;
-      }
-
       // Set user state from authenticated user
+      // Admins can access Strategic Planning too - default to advisor view
       setUserState({
-        role: user.role,
+        role: user.role === 'admin' ? 'advisor' : user.role, // Admins default to advisor view but can toggle
         rank: user.rank,
         name: user.name,
         um: user.unitManager || 'System',
@@ -109,16 +104,16 @@ export function StrategicPlanningApp() {
   const permissions = getUserPermissions(user.role);
   const canToggleToLeader = permissions.canToggleLeaderView && user.rank !== 'LA';
 
-  // Toggle between advisor and leader view (only for leaders/admins)
-  const toggleRole = () => {
+  // Change view role (only for leaders/admins)
+  const changeRole = (newRole: 'advisor' | 'leader') => {
     if (!userState || !permissions.canToggleLeaderView || user.rank === 'LA') {
       return;
     }
     
-    // Toggle view role, but keep original rank from user object
+    // Set view role, but keep original rank from user object
     setUserState({
       ...userState,
-      role: userState.role === 'advisor' ? 'leader' : 'advisor',
+      role: newRole,
     });
   };
 
@@ -136,20 +131,47 @@ export function StrategicPlanningApp() {
           </div>
         </div>
         <div className="flex flex-wrap items-center gap-2 sm:gap-2">
-          {canToggleToLeader && (
-            <button
-              onClick={toggleRole}
-              className="px-3 py-2 sm:px-4 sm:py-2 bg-gradient-to-r from-slate-600 to-slate-700 text-white rounded-lg text-xs sm:text-sm font-semibold hover:shadow-lg hover:scale-105 transition-all whitespace-nowrap"
-              title={`Switch to ${userState.role === 'advisor' ? 'Leader' : 'Advisor'} view`}
-            >
-              <span className="hidden sm:inline">{userState.role === 'advisor' ? '👑 Leader View' : '🛡️ Advisor View'}</span>
-              <span className="sm:hidden">{userState.role === 'advisor' ? '👑 Leader' : '🛡️ Advisor'}</span>
-            </button>
-          )}
-          {!canToggleToLeader && (
-            <div className="px-3 py-2 sm:px-4 sm:py-2 bg-slate-300 text-slate-600 rounded-lg text-xs sm:text-sm font-semibold cursor-not-allowed whitespace-nowrap" title="Life Advisors can only view Advisor mode">
-              <span className="hidden sm:inline">🛡️ Advisor View Only</span>
-              <span className="sm:hidden">🛡️ Advisor</span>
+          {canToggleToLeader ? (
+            <div className="flex items-center gap-2 bg-white rounded-lg p-1 border-2 border-slate-200 shadow-sm">
+              <label className={`flex items-center gap-1.5 sm:gap-2 px-3 py-2 rounded-md cursor-pointer transition-all whitespace-nowrap ${
+                userState.role === 'advisor'
+                  ? 'bg-gradient-to-r from-blue-500 to-blue-600 text-white shadow-md'
+                  : 'text-slate-600 hover:bg-slate-50'
+              }`}>
+                <input
+                  type="radio"
+                  name="viewMode"
+                  value="advisor"
+                  checked={userState.role === 'advisor'}
+                  onChange={() => changeRole('advisor')}
+                  className="sr-only"
+                />
+                <span className="text-base sm:text-lg">🛡️</span>
+                <span className="text-xs sm:text-sm font-semibold">Advisor</span>
+              </label>
+              <label className={`flex items-center gap-1.5 sm:gap-2 px-3 py-2 rounded-md cursor-pointer transition-all whitespace-nowrap ${
+                userState.role === 'leader'
+                  ? 'bg-gradient-to-r from-purple-500 to-purple-600 text-white shadow-md'
+                  : 'text-slate-600 hover:bg-slate-50'
+              }`}>
+                <input
+                  type="radio"
+                  name="viewMode"
+                  value="leader"
+                  checked={userState.role === 'leader'}
+                  onChange={() => changeRole('leader')}
+                  className="sr-only"
+                />
+                <span className="text-base sm:text-lg">👑</span>
+                <span className="text-xs sm:text-sm font-semibold">Leader</span>
+              </label>
+            </div>
+          ) : (
+            <div className="flex items-center gap-2 bg-slate-100 rounded-lg p-1 border-2 border-slate-300 shadow-sm">
+              <div className="flex items-center gap-1.5 sm:gap-2 px-3 py-2 rounded-md bg-slate-300 text-slate-600 cursor-not-allowed whitespace-nowrap" title="Life Advisors can only view Advisor mode">
+                <span className="text-base sm:text-lg">🛡️</span>
+                <span className="text-xs sm:text-sm font-semibold">Advisor Only</span>
+              </div>
             </div>
           )}
           <button
@@ -185,7 +207,7 @@ export function StrategicPlanningApp() {
       />
       
       <div className="mt-6">
-        {activeTab === 'overview' && <OverviewTab />}
+        {activeTab === 'overview' && <OverviewTab userState={userState} />}
         {activeTab === 'advisor' && <AdvisorSimTab />}
         {activeTab === 'leader' && <LeaderHQTab userState={userState} onGenerateRecruitmentAd={() => showAI('Recruitment Ad', 'Recruitment ad generated (mock)')} />}
         {activeTab === 'growth' && <PathToPremierTab userState={userState} />}

@@ -1,3 +1,5 @@
+'use client';
+
 import { Sidebar } from '@/components/sidebar';
 import { StrategicPlanningApp } from '@/components/strategic-planning/strategic-planning-app';
 
