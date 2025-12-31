@@ -1,5 +1,19 @@
-import { signOut as firebaseSignOut, onAuthStateChanged, User } from 'firebase/auth';
+import { signInAnonymously, signOut as firebaseSignOut, onAuthStateChanged, User } from 'firebase/auth';
 import { auth } from './firebase';
+
+/**
+ * Sign in anonymously to Firebase Auth
+ * This allows users to use the app without email/password
+ */
+export async function signInAnonymouslyAuth(): Promise<User> {
+  try {
+    const userCredential = await signInAnonymously(auth);
+    return userCredential.user;
+  } catch (error) {
+    console.error('Error signing in anonymously:', error);
+    throw new Error(`Failed to sign in: ${error instanceof Error ? error.message : 'Unknown error'}`);
+  }
+}
 
 /**
  * Sign out from Firebase Auth

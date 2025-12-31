@@ -163,17 +163,7 @@ export default function SetupPage() {
 
         {error && (
           <div className="mb-4 p-3 bg-red-100 border border-red-300 text-red-800 rounded">
-            <p className="font-semibold mb-1">Error:</p>
-            <p>{error}</p>
-            {error.includes('already exists') && (
-              <div className="mt-3 pt-3 border-t border-red-300">
-                <p className="text-sm font-medium mb-2">What to do:</p>
-                <ul className="text-sm list-disc list-inside space-y-1">
-                  <li>Try logging in with this email at <a href="/login" className="underline font-semibold">/login</a></li>
-                  <li>Or use a different email address to create a new account</li>
-                </ul>
-              </div>
-            )}
+            {error}
           </div>
         )}
 

@@ -119,13 +119,13 @@ export function StrategicPlanningApp() {
 
   return (
     <>
-      <div className="mb-4 sm:mb-6 lg:mb-8 flex flex-col gap-4 sm:gap-6">
-        <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-3 sm:gap-4">
+      <div className="mb-4 sm:mb-5 md:mb-6 lg:mb-8 flex flex-col gap-4 sm:gap-5 md:gap-6">
+        <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-3 sm:gap-4 md:gap-5">
           <div className="flex-1 min-w-0">
-            <h1 className="text-2xl sm:text-3xl lg:text-4xl font-extrabold bg-gradient-to-r from-indigo-600 via-purple-600 to-blue-600 bg-clip-text text-transparent leading-tight">
+            <h1 className="text-xl sm:text-2xl md:text-3xl lg:text-4xl font-extrabold bg-gradient-to-r from-indigo-600 via-purple-600 to-blue-600 bg-clip-text text-transparent leading-tight">
               ACS 3.0 Strategic Planning
             </h1>
-            <p className="mt-1 sm:mt-2 text-sm sm:text-base lg:text-lg text-gray-600 font-medium break-words">
+            <p className="mt-2 sm:mt-2.5 md:mt-3 text-sm sm:text-base md:text-lg lg:text-xl text-gray-600 font-medium break-words leading-relaxed">
               Welcome, {userState.name}! Plan your goals and simulate your income potential.
             </p>
           </div>
