@@ -4,7 +4,7 @@ interface TabNavigationProps {
   activeTab: string;
   onTabChange: (tab: string) => void;
   isLeader: boolean;
-  canAccessLeaderTabs: boolean; // True if user's original rank is UM (Leader), false if LA (Life Advisor)
+  canAccessLeaderTabs: boolean; // True if user's original rank is a leader rank (ADD/SUM/UM/AUM), false if ADV (Advisor)
 }
 
 export function TabNavigation({ activeTab, onTabChange, isLeader, canAccessLeaderTabs }: TabNavigationProps) {

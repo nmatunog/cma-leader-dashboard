@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation';
 // Use dynamic imports to avoid SSR issues with Firebase initialization
 // import { registerUser } from '@/lib/auth-service';
 import type { UserCreateData } from '@/types/user';
+import { getAgencies } from '@/services/agency-service';
 
 export default function SetupPage() {
   const router = useRouter();
@@ -14,6 +15,7 @@ export default function SetupPage() {
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState(false);
   const [firebaseConfigured, setFirebaseConfigured] = useState<boolean | null>(null);
+  const [agencies, setAgencies] = useState<string[]>([]);
   const [formData, setFormData] = useState<UserCreateData>({
     email: '',
     password: '',
@@ -21,12 +23,24 @@ export default function SetupPage() {
     role: 'admin',
     rank: 'ADMIN',
     unitManager: '',
-    agencyName: 'Cebu Matunog Agency',
+    agencyName: '',
   });
 
   useEffect(() => {
     checkForAdmin();
+    loadAgencies();
   }, []);
+
+  const loadAgencies = async () => {
+    try {
+      const agencyList = await getAgencies();
+      setAgencies(agencyList);
+    } catch (error) {
+      console.error('Error loading agencies:', error);
+      // Fallback to empty array - user can still type manually if needed
+      setAgencies([]);
+    }
+  };
 
   const checkForAdmin = async () => {
     try {
@@ -221,13 +235,17 @@ export default function SetupPage() {
             <label className="block text-sm font-semibold text-slate-700 mb-2">
               Agency Name *
             </label>
-            <input
-              type="text"
+            <select
               value={formData.agencyName}
               onChange={(e) => setFormData({ ...formData, agencyName: e.target.value })}
               className="w-full p-3 border-2 border-slate-200 rounded-lg focus:border-[#D31145] focus:ring-2 focus:ring-[#D31145]/20"
               required
-            />
+            >
+              <option value="">Select Agency</option>
+              {agencies.map(agency => (
+                <option key={agency} value={agency}>{agency}</option>
+              ))}
+            </select>
           </div>
 
           <div className="pt-4">

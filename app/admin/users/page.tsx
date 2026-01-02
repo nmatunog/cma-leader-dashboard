@@ -10,9 +10,11 @@ import {
   updateUser, 
   deactivateUser, 
   reactivateUser, 
-  deleteUser 
+  deleteUser,
+  promoteUser
 } from '@/lib/user-service';
 import type { User, UserCreateData, UserUpdateData, UserRole, UserRank } from '@/types/user';
+import { getAgencies, addAgency, removeAgency, type Agency } from '@/services/agency-service';
 
 export default function AdminUsersPage() {
   const router = useRouter();
@@ -27,6 +29,12 @@ export default function AdminUsersPage() {
   const [filterAgency, setFilterAgency] = useState<string>('all');
   const [searchQuery, setSearchQuery] = useState('');
   const [actionLoading, setActionLoading] = useState<string | null>(null);
+  const [agencies, setAgencies] = useState<string[]>([]);
+  const [showAgencyModal, setShowAgencyModal] = useState(false);
+  const [newAgencyName, setNewAgencyName] = useState('');
+  const [agencyError, setAgencyError] = useState<string | null>(null);
+  const [promotingUser, setPromotingUser] = useState<User | null>(null);
+  const [showPromoteModal, setShowPromoteModal] = useState(false);
 
   // Check if user is admin
   useEffect(() => {
@@ -37,12 +45,24 @@ export default function AdminUsersPage() {
     }
   }, [currentUser, authLoading, router]);
 
-  // Load users
+  // Load users and agencies
   useEffect(() => {
     if (currentUser && currentUser.role === 'admin') {
       loadUsers();
+      loadAgencies();
     }
   }, [currentUser]);
+
+  const loadAgencies = async () => {
+    try {
+      const agencyList = await getAgencies();
+      setAgencies(agencyList);
+    } catch (error) {
+      console.error('Error loading agencies:', error);
+      // Fallback to empty array or default agencies
+      setAgencies([]);
+    }
+  };
 
   const loadUsers = async () => {
     try {
@@ -154,6 +174,79 @@ export default function AdminUsersPage() {
     }
   };
 
+  const handleAddAgency = async () => {
+    if (!newAgencyName.trim()) {
+      setAgencyError('Please enter an agency name');
+      return;
+    }
+
+    setAgencyError(null);
+    setActionLoading('add-agency');
+
+    try {
+      const result = await addAgency(newAgencyName.trim(), currentUser?.uid);
+      if (result.success) {
+        setNewAgencyName('');
+        setShowAgencyModal(false);
+        await loadAgencies(); // Reload agencies list
+      } else {
+        setAgencyError(result.error || 'Failed to add agency');
+      }
+    } catch (error) {
+      setAgencyError('An unexpected error occurred');
+      console.error('Error adding agency:', error);
+    } finally {
+      setActionLoading(null);
+    }
+  };
+
+  const handlePromoteUser = async () => {
+    if (!promotingUser) return;
+
+    try {
+      setActionLoading(`promote-${promotingUser.uid}`);
+      const result = await promoteUser(promotingUser.uid);
+      if (result.success) {
+        await loadUsers();
+        setShowPromoteModal(false);
+        setPromotingUser(null);
+        alert(`Successfully promoted ${promotingUser.name} to ${result.newRank}`);
+      } else {
+        alert(result.error || 'Failed to promote user');
+      }
+    } catch (err) {
+      alert(err instanceof Error ? err.message : 'Failed to promote user');
+    } finally {
+      setActionLoading(null);
+    }
+  };
+
+  // Get next rank for promotion path
+  const getNextRank = (currentRank: UserRank): UserRank | null => {
+    const promotionPath: Record<UserRank, UserRank | null> = {
+      'ADV': 'AUM',
+      'AUM': 'UM',
+      'UM': 'SUM',
+      'SUM': 'ADD',
+      'ADD': null,
+      'ADMIN': null,
+    };
+    return promotionPath[currentRank] || null;
+  };
+
+  // Get rank display name
+  const getRankDisplayName = (rank: UserRank): string => {
+    const rankNames: Record<UserRank, string> = {
+      'ADMIN': 'Admin',
+      'ADD': 'Agency/District Director',
+      'SUM': 'Senior Unit Manager',
+      'UM': 'Unit Manager',
+      'AUM': 'Associate Unit Manager',
+      'ADV': 'Advisor',
+    };
+    return rankNames[rank] || rank;
+  };
+
   // Filter users
   const filteredUsers = users.filter(user => {
     if (filterRole !== 'all' && user.role !== filterRole) return false;
@@ -169,7 +262,9 @@ export default function AdminUsersPage() {
     return true;
   });
 
-  const agencies = Array.from(new Set(users.map(u => u.agencyName))).sort();
+  // Use agencies from service (loaded from Firestore)
+  // Fallback to unique agencies from users if service fails
+  const displayAgencies = agencies.length > 0 ? agencies : Array.from(new Set(users.map(u => u.agencyName))).sort();
 
   if (authLoading || loading) {
     return (
@@ -201,12 +296,20 @@ export default function AdminUsersPage() {
               <h1 className="text-3xl font-bold text-slate-900 mb-2">User Management</h1>
               <p className="text-slate-600">Manage user accounts, roles, and permissions</p>
             </div>
-            <button
-              onClick={() => setShowCreateModal(true)}
-              className="px-6 py-3 bg-gradient-to-r from-[#D31145] to-red-600 text-white font-bold rounded-lg hover:from-red-600 hover:to-red-700 transition-all shadow-md hover:shadow-lg"
-            >
-              + Create New User
-            </button>
+            <div className="flex gap-3">
+              <button
+                onClick={() => setShowAgencyModal(true)}
+                className="px-4 py-3 bg-gradient-to-r from-blue-600 to-indigo-600 text-white font-bold rounded-lg hover:from-blue-700 hover:to-indigo-700 transition-all shadow-md hover:shadow-lg"
+              >
+                + Add Agency
+              </button>
+              <button
+                onClick={() => setShowCreateModal(true)}
+                className="px-6 py-3 bg-gradient-to-r from-[#D31145] to-red-600 text-white font-bold rounded-lg hover:from-red-600 hover:to-red-700 transition-all shadow-md hover:shadow-lg"
+              >
+                + Create New User
+              </button>
+            </div>
           </div>
 
           {/* Filters */}
@@ -243,7 +346,7 @@ export default function AdminUsersPage() {
                   className="w-full p-2 border-2 border-slate-200 rounded-lg focus:border-[#D31145] focus:ring-2 focus:ring-[#D31145]/20"
                 >
                   <option value="all">All Agencies</option>
-                  {agencies.map(agency => (
+                  {displayAgencies.map(agency => (
                     <option key={agency} value={agency}>{agency}</option>
                   ))}
                 </select>
@@ -361,6 +464,19 @@ export default function AdminUsersPage() {
                                 {actionLoading === `reactivate-${user.uid}` ? '...' : 'Activate'}
                               </button>
                             )}
+                            {getNextRank(user.rank) && (
+                              <button
+                                onClick={() => {
+                                  setPromotingUser(user);
+                                  setShowPromoteModal(true);
+                                }}
+                                disabled={actionLoading !== null}
+                                className="px-3 py-1 bg-green-600 text-white rounded hover:bg-green-700 text-xs font-semibold disabled:opacity-50 disabled:cursor-not-allowed"
+                                title="Promote user"
+                              >
+                                Promote
+                              </button>
+                            )}
                             <button
                               onClick={() => handleDeleteUser(user.uid)}
                               disabled={actionLoading !== null || user.uid === currentUser.uid}
@@ -382,6 +498,7 @@ export default function AdminUsersPage() {
           {/* Create User Modal */}
           {showCreateModal && (
             <UserCreateModal
+              agencies={displayAgencies}
               onClose={() => setShowCreateModal(false)}
               onSubmit={handleCreateUser}
               loading={actionLoading === 'create'}
@@ -392,12 +509,44 @@ export default function AdminUsersPage() {
           {showEditModal && editingUser && (
             <UserEditModal
               user={editingUser}
+              agencies={displayAgencies}
               onClose={() => {
                 setShowEditModal(false);
                 setEditingUser(null);
               }}
               onSubmit={handleUpdateUser}
               loading={actionLoading?.startsWith('edit-') || false}
+            />
+          )}
+
+          {/* Agency Modal */}
+          {showAgencyModal && (
+            <AgencyModal
+              onClose={() => {
+                setShowAgencyModal(false);
+                setNewAgencyName('');
+                setAgencyError(null);
+              }}
+              onAdd={handleAddAgency}
+              newAgencyName={newAgencyName}
+              setNewAgencyName={setNewAgencyName}
+              error={agencyError}
+              loading={actionLoading === 'add-agency'}
+            />
+          )}
+
+          {/* Promote User Modal */}
+          {showPromoteModal && promotingUser && getNextRank(promotingUser.rank) && (
+            <PromoteUserModal
+              user={promotingUser}
+              nextRank={getNextRank(promotingUser.rank)!}
+              onClose={() => {
+                setShowPromoteModal(false);
+                setPromotingUser(null);
+              }}
+              onPromote={handlePromoteUser}
+              loading={actionLoading === `promote-${promotingUser.uid}`}
+              getRankDisplayName={getRankDisplayName}
             />
           )}
         </div>
@@ -408,10 +557,12 @@ export default function AdminUsersPage() {
 
 // Create User Modal Component
 function UserCreateModal({
+  agencies,
   onClose,
   onSubmit,
   loading,
 }: {
+  agencies: string[];
   onClose: () => void;
   onSubmit: (data: UserCreateData) => Promise<{ success: boolean; error?: string }>;
   loading: boolean;
@@ -421,7 +572,7 @@ function UserCreateModal({
     password: '',
     name: '',
     role: 'advisor',
-    rank: 'LA',
+    rank: 'ADV',
     unitManager: '',
     agencyName: '',
   });
@@ -446,8 +597,6 @@ function UserCreateModal({
     let finalRank: UserRank = formData.rank;
     if (formData.role === 'admin') {
       finalRank = 'ADMIN';
-    } else if (formData.role === 'leader' && formData.rank === 'LA') {
-      finalRank = 'UM';
     }
 
     const result = await onSubmit({
@@ -462,7 +611,7 @@ function UserCreateModal({
         password: '',
         name: '',
         role: 'advisor',
-        rank: 'LA',
+        rank: 'ADV',
         unitManager: '',
         agencyName: '',
       });
@@ -530,7 +679,7 @@ function UserCreateModal({
                   setFormData({
                     ...formData,
                     role,
-                    rank: role === 'admin' ? 'ADMIN' : role === 'leader' ? 'UM' : 'LA',
+                    rank: role === 'admin' ? 'ADMIN' : role === 'leader' ? 'UM' : 'ADV',
                   });
                 }}
                 className="w-full p-2 border-2 border-slate-200 rounded-lg focus:border-[#D31145] focus:ring-2 focus:ring-[#D31145]/20"
@@ -555,25 +704,30 @@ function UserCreateModal({
                   <option value="ADMIN">ADMIN</option>
                 ) : formData.role === 'leader' ? (
                   <>
-                    <option value="UM">UM</option>
-                    <option value="SUM">SUM</option>
-                    <option value="AD">AD</option>
+                    <option value="ADD">Agency/District Director</option>
+                    <option value="SUM">Senior Unit Manager</option>
+                    <option value="UM">Unit Manager</option>
+                    <option value="AUM">Associate Unit Manager</option>
                   </>
                 ) : (
-                  <option value="LA">LA</option>
+                  <option value="ADV">Advisor</option>
                 )}
               </select>
             </div>
 
             <div>
               <label className="block text-sm font-semibold text-slate-700 mb-2">Agency Name *</label>
-              <input
-                type="text"
+              <select
                 value={formData.agencyName}
                 onChange={(e) => setFormData({ ...formData, agencyName: e.target.value })}
                 className="w-full p-2 border-2 border-slate-200 rounded-lg focus:border-[#D31145] focus:ring-2 focus:ring-[#D31145]/20"
                 required
-              />
+              >
+                <option value="">Select Agency</option>
+                {agencies.map(agency => (
+                  <option key={agency} value={agency}>{agency}</option>
+                ))}
+              </select>
             </div>
 
             <div>
@@ -614,11 +768,13 @@ function UserCreateModal({
 // Edit User Modal Component
 function UserEditModal({
   user,
+  agencies,
   onClose,
   onSubmit,
   loading,
 }: {
   user: User;
+  agencies: string[];
   onClose: () => void;
   onSubmit: (uid: string, data: UserUpdateData) => Promise<{ success: boolean; error?: string }>;
   loading: boolean;
@@ -702,7 +858,7 @@ function UserEditModal({
                   setFormData({
                     ...formData,
                     role,
-                    rank: role === 'admin' ? 'ADMIN' : role === 'leader' ? 'UM' : 'LA',
+                    rank: role === 'admin' ? 'ADMIN' : role === 'leader' ? 'UM' : 'ADV',
                   });
                 }}
                 className="w-full p-2 border-2 border-slate-200 rounded-lg focus:border-[#D31145] focus:ring-2 focus:ring-[#D31145]/20"
@@ -727,25 +883,30 @@ function UserEditModal({
                   <option value="ADMIN">ADMIN</option>
                 ) : formData.role === 'leader' ? (
                   <>
-                    <option value="UM">UM</option>
-                    <option value="SUM">SUM</option>
-                    <option value="AD">AD</option>
+                    <option value="ADD">Agency/District Director</option>
+                    <option value="SUM">Senior Unit Manager</option>
+                    <option value="UM">Unit Manager</option>
+                    <option value="AUM">Associate Unit Manager</option>
                   </>
                 ) : (
-                  <option value="LA">LA</option>
+                  <option value="ADV">Advisor</option>
                 )}
               </select>
             </div>
 
             <div>
               <label className="block text-sm font-semibold text-slate-700 mb-2">Agency Name *</label>
-              <input
-                type="text"
+              <select
                 value={formData.agencyName}
                 onChange={(e) => setFormData({ ...formData, agencyName: e.target.value })}
                 className="w-full p-2 border-2 border-slate-200 rounded-lg focus:border-[#D31145] focus:ring-2 focus:ring-[#D31145]/20"
                 required
-              />
+              >
+                <option value="">Select Agency</option>
+                {agencies.map(agency => (
+                  <option key={agency} value={agency}>{agency}</option>
+                ))}
+              </select>
             </div>
 
             <div>
@@ -796,3 +957,91 @@ function UserEditModal({
   );
 }
 
+// Promote User Modal Component
+function PromoteUserModal({
+  user,
+  nextRank,
+  onClose,
+  onPromote,
+  loading,
+  getRankDisplayName,
+}: {
+  user: User;
+  nextRank: UserRank;
+  onClose: () => void;
+  onPromote: () => Promise<void>;
+  loading: boolean;
+  getRankDisplayName: (rank: UserRank) => string;
+}) {
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    await onPromote();
+  };
+
+  return (
+    <div className="fixed inset-0 bg-black/50 flex items-center justify-center p-4 z-50" onClick={onClose}>
+      <div className="bg-white rounded-lg shadow-xl max-w-md w-full" onClick={(e) => e.stopPropagation()}>
+        <div className="bg-gradient-to-r from-green-600 to-emerald-600 text-white p-4 flex justify-between items-center rounded-t-lg">
+          <h3 className="text-xl font-bold">Promote User</h3>
+          <button onClick={onClose} className="text-white hover:text-gray-200 text-2xl">×</button>
+        </div>
+        <form onSubmit={handleSubmit} className="p-6">
+          <div className="mb-4">
+            <p className="text-sm text-slate-600 mb-2">User:</p>
+            <p className="font-semibold text-lg text-slate-900">{user.name}</p>
+            <p className="text-sm text-slate-500">{user.email}</p>
+          </div>
+
+          <div className="mb-4 p-4 bg-slate-50 rounded-lg border-2 border-slate-200">
+            <div className="flex items-center justify-between mb-2">
+              <span className="text-sm font-medium text-slate-600">Current Rank:</span>
+              <span className="font-bold text-slate-900">{getRankDisplayName(user.rank)}</span>
+            </div>
+            <div className="flex items-center justify-center my-2">
+              <span className="text-2xl">↓</span>
+            </div>
+            <div className="flex items-center justify-between">
+              <span className="text-sm font-medium text-slate-600">New Rank:</span>
+              <span className="font-bold text-green-600 text-lg">{getRankDisplayName(nextRank)}</span>
+            </div>
+          </div>
+
+          {user.rank === 'ADV' && (
+            <div className="mb-4 p-3 bg-blue-50 border border-blue-200 rounded-lg">
+              <p className="text-sm text-blue-800">
+                <strong>Note:</strong> Promoting from Advisor to AUM will change the user's role from 'advisor' to 'leader'. 
+                The user will remain in their current unit and can manage advisors while still being counted as part of the unit.
+              </p>
+            </div>
+          )}
+
+          {user.rank === 'AUM' && (
+            <div className="mb-4 p-3 bg-blue-50 border border-blue-200 rounded-lg">
+              <p className="text-sm text-blue-800">
+                <strong>Note:</strong> The user will be promoted to Unit Manager. They will continue managing their current advisors and unit structure.
+              </p>
+            </div>
+          )}
+
+          <div className="flex gap-4 justify-end">
+            <button
+              type="button"
+              onClick={onClose}
+              className="px-6 py-2 bg-slate-300 text-slate-700 rounded-lg hover:bg-slate-400 font-semibold"
+              disabled={loading}
+            >
+              Cancel
+            </button>
+            <button
+              type="submit"
+              className="px-6 py-2 bg-gradient-to-r from-green-600 to-emerald-600 text-white rounded-lg hover:from-green-700 hover:to-emerald-700 font-semibold disabled:opacity-50 disabled:cursor-not-allowed"
+              disabled={loading}
+            >
+              {loading ? 'Promoting...' : 'Confirm Promotion'}
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+}

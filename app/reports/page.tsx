@@ -7,9 +7,18 @@ import { getAllGoals, getAgencyGoals, type StrategicPlanningGoal } from '@/servi
 import { formatNumberWithCommas } from '@/components/strategic-planning/utils/number-format';
 import { useAuth } from '@/contexts/auth-context';
 
+interface QuarterlyData {
+  baseManpower: number;
+  newRecruits: number;
+  fyp: number;
+  fyc: number;
+  cases: number;
+}
+
 interface AggregatedData {
   totalUsers: number;
   totalManpower: number;
+  totalNewRecruits: number;
   totalFYP: number;
   totalFYC: number;
   totalIncome: number;
@@ -17,6 +26,17 @@ interface AggregatedData {
   byAgency: Record<string, {
     count: number;
     manpower: number;
+    newRecruits: number;
+    fyp: number;
+    fyc: number;
+    income: number;
+  }>;
+  byUnit: Record<string, {
+    unitManager: string;
+    agencyName: string;
+    count: number;
+    manpower: number;
+    newRecruits: number;
     fyp: number;
     fyc: number;
     income: number;
@@ -24,10 +44,17 @@ interface AggregatedData {
   byRank: Record<string, {
     count: number;
     manpower: number;
+    newRecruits: number;
     fyp: number;
     fyc: number;
     income: number;
   }>;
+  quarterly: {
+    q1: QuarterlyData;
+    q2: QuarterlyData;
+    q3: QuarterlyData;
+    q4: QuarterlyData;
+  };
 }
 
 export default function ReportsPage() {
@@ -38,8 +65,10 @@ export default function ReportsPage() {
   const [error, setError] = useState<string | null>(null);
   const [filterAgency, setFilterAgency] = useState<string>('all');
   const [filterRank, setFilterRank] = useState<string>('all');
+  const [filterUnit, setFilterUnit] = useState<string>('all');
   const [aggregated, setAggregated] = useState<AggregatedData | null>(null);
   const [selectedGoal, setSelectedGoal] = useState<StrategicPlanningGoal | null>(null);
+  const [showQuarterlySummary, setShowQuarterlySummary] = useState(false);
 
   // Check if user is admin
   useEffect(() => {
@@ -56,7 +85,7 @@ export default function ReportsPage() {
     if (goals.length > 0) {
       calculateAggregates();
     }
-  }, [goals, filterAgency, filterRank]);
+  }, [goals, filterAgency, filterRank, filterUnit]);
 
   const loadGoals = async () => {
     try {
@@ -76,55 +105,125 @@ export default function ReportsPage() {
     const filtered = goals.filter(goal => {
       if (filterAgency !== 'all' && goal.agencyName !== filterAgency) return false;
       if (filterRank !== 'all' && goal.userRank !== filterRank) return false;
+      if (filterUnit !== 'all') {
+        const goalUnitName = goal.unitName || `${goal.unitManager}_${goal.agencyName}`;
+        if (goalUnitName !== filterUnit) return false;
+      }
       return true;
     });
 
     const agg: AggregatedData = {
       totalUsers: filtered.length,
       totalManpower: 0,
+      totalNewRecruits: 0,
       totalFYP: 0,
       totalFYC: 0,
       totalIncome: 0,
       avgMonthlyIncome: 0,
       byAgency: {},
+      byUnit: {},
       byRank: {},
+      quarterly: {
+        q1: { baseManpower: 0, newRecruits: 0, fyp: 0, fyc: 0, cases: 0 },
+        q2: { baseManpower: 0, newRecruits: 0, fyp: 0, fyc: 0, cases: 0 },
+        q3: { baseManpower: 0, newRecruits: 0, fyp: 0, fyc: 0, cases: 0 },
+        q4: { baseManpower: 0, newRecruits: 0, fyp: 0, fyc: 0, cases: 0 },
+      },
     };
 
+    // STEP 1: Group goals by unit first (unit-level consolidation)
+    const unitGroups: Record<string, StrategicPlanningGoal[]> = {};
     filtered.forEach(goal => {
-      // Overall totals
-      agg.totalManpower += goal.annualManpower;
-      agg.totalFYP += goal.annualFYP;
-      agg.totalFYC += goal.annualFYC;
-      agg.totalIncome += goal.annualIncome;
+      const goalUnitName = goal.unitName || `${goal.unitManager}_${goal.agencyName}`;
+      if (!unitGroups[goalUnitName]) {
+        unitGroups[goalUnitName] = [];
+      }
+      unitGroups[goalUnitName].push(goal);
+    });
 
-      // By agency
-      if (!agg.byAgency[goal.agencyName]) {
-        agg.byAgency[goal.agencyName] = {
+    // Helper function to calculate annual new recruits from quarterly data
+    const calculateAnnualNewRecruits = (goal: StrategicPlanningGoal): number => {
+      return (goal.q1?.newRecruits || 0) + 
+             (goal.q2?.newRecruits || 0) + 
+             (goal.q3?.newRecruits || 0) + 
+             (goal.q4?.newRecruits || 0);
+    };
+
+    // STEP 2: Calculate unit totals (consolidate goals within each unit)
+    Object.entries(unitGroups).forEach(([unitName, unitGoals]) => {
+      const unitTotal = unitGoals.reduce((acc, goal) => {
+        const annualNewRecruits = calculateAnnualNewRecruits(goal);
+        return {
+          count: acc.count + 1,
+          manpower: acc.manpower + goal.annualManpower,
+          newRecruits: acc.newRecruits + annualNewRecruits,
+          fyp: acc.fyp + goal.annualFYP,
+          fyc: acc.fyc + goal.annualFYC,
+          income: acc.income + goal.annualIncome,
+        };
+      }, { count: 0, manpower: 0, newRecruits: 0, fyp: 0, fyc: 0, income: 0 });
+
+      // Store unit totals
+      const firstGoal = unitGoals[0];
+      agg.byUnit[unitName] = {
+        unitManager: firstGoal.unitManager,
+        agencyName: firstGoal.agencyName,
+        count: unitTotal.count,
+        manpower: unitTotal.manpower,
+        newRecruits: unitTotal.newRecruits,
+        fyp: unitTotal.fyp,
+        fyc: unitTotal.fyc,
+        income: unitTotal.income,
+      };
+    });
+
+    // STEP 3: Calculate agency totals from unit totals (agency-level consolidation)
+    Object.values(agg.byUnit).forEach(unitData => {
+      const agencyName = unitData.agencyName;
+      if (!agg.byAgency[agencyName]) {
+        agg.byAgency[agencyName] = {
           count: 0,
           manpower: 0,
+          newRecruits: 0,
           fyp: 0,
           fyc: 0,
           income: 0,
         };
       }
-      agg.byAgency[goal.agencyName].count++;
-      agg.byAgency[goal.agencyName].manpower += goal.annualManpower;
-      agg.byAgency[goal.agencyName].fyp += goal.annualFYP;
-      agg.byAgency[goal.agencyName].fyc += goal.annualFYC;
-      agg.byAgency[goal.agencyName].income += goal.annualIncome;
+      // Sum unit totals (not individual goals) to get agency totals
+      agg.byAgency[agencyName].count += unitData.count;
+      agg.byAgency[agencyName].manpower += unitData.manpower;
+      agg.byAgency[agencyName].newRecruits += unitData.newRecruits;
+      agg.byAgency[agencyName].fyp += unitData.fyp;
+      agg.byAgency[agencyName].fyc += unitData.fyc;
+      agg.byAgency[agencyName].income += unitData.income;
+    });
 
-      // By rank
+    // STEP 4: Calculate overall totals from agency totals
+    Object.values(agg.byAgency).forEach(agencyData => {
+      agg.totalManpower += agencyData.manpower;
+      agg.totalNewRecruits += agencyData.newRecruits;
+      agg.totalFYP += agencyData.fyp;
+      agg.totalFYC += agencyData.fyc;
+      agg.totalIncome += agencyData.income;
+    });
+
+    // STEP 5: Calculate by rank (still using individual goals for rank breakdown)
+    filtered.forEach(goal => {
       if (!agg.byRank[goal.userRank]) {
         agg.byRank[goal.userRank] = {
           count: 0,
           manpower: 0,
+          newRecruits: 0,
           fyp: 0,
           fyc: 0,
           income: 0,
         };
       }
+      const annualNewRecruits = calculateAnnualNewRecruits(goal);
       agg.byRank[goal.userRank].count++;
       agg.byRank[goal.userRank].manpower += goal.annualManpower;
+      agg.byRank[goal.userRank].newRecruits += annualNewRecruits;
       agg.byRank[goal.userRank].fyp += goal.annualFYP;
       agg.byRank[goal.userRank].fyc += goal.annualFYC;
       agg.byRank[goal.userRank].income += goal.annualIncome;
@@ -134,17 +233,68 @@ export default function ReportsPage() {
       ? agg.totalIncome / filtered.length / 12 
       : 0;
 
+    // STEP 6: Calculate quarterly totals (sum all filtered goals' quarterly data)
+    filtered.forEach(goal => {
+      // Q1 totals
+      agg.quarterly.q1.baseManpower += goal.q1?.baseManpower || 0;
+      agg.quarterly.q1.newRecruits += goal.q1?.newRecruits || 0;
+      agg.quarterly.q1.fyp += goal.q1?.fyp || 0;
+      agg.quarterly.q1.fyc += goal.q1?.fyc || 0;
+      agg.quarterly.q1.cases += goal.q1?.cases || 0;
+
+      // Q2 totals
+      agg.quarterly.q2.baseManpower += goal.q2?.baseManpower || 0;
+      agg.quarterly.q2.newRecruits += goal.q2?.newRecruits || 0;
+      agg.quarterly.q2.fyp += goal.q2?.fyp || 0;
+      agg.quarterly.q2.fyc += goal.q2?.fyc || 0;
+      agg.quarterly.q2.cases += goal.q2?.cases || 0;
+
+      // Q3 totals
+      agg.quarterly.q3.baseManpower += goal.q3?.baseManpower || 0;
+      agg.quarterly.q3.newRecruits += goal.q3?.newRecruits || 0;
+      agg.quarterly.q3.fyp += goal.q3?.fyp || 0;
+      agg.quarterly.q3.fyc += goal.q3?.fyc || 0;
+      agg.quarterly.q3.cases += goal.q3?.cases || 0;
+
+      // Q4 totals
+      agg.quarterly.q4.baseManpower += goal.q4?.baseManpower || 0;
+      agg.quarterly.q4.newRecruits += goal.q4?.newRecruits || 0;
+      agg.quarterly.q4.fyp += goal.q4?.fyp || 0;
+      agg.quarterly.q4.fyc += goal.q4?.fyc || 0;
+      agg.quarterly.q4.cases += goal.q4?.cases || 0;
+    });
+
     setAggregated(agg);
   };
 
   const filteredGoals = goals.filter(goal => {
     if (filterAgency !== 'all' && goal.agencyName !== filterAgency) return false;
     if (filterRank !== 'all' && goal.userRank !== filterRank) return false;
+    if (filterUnit !== 'all') {
+      const goalUnitName = goal.unitName || `${goal.unitManager}_${goal.agencyName}`;
+      if (goalUnitName !== filterUnit) return false;
+    }
     return true;
   });
 
   const agencies = Array.from(new Set(goals.map(g => g.agencyName))).sort();
   const ranks = Array.from(new Set(goals.map(g => g.userRank))).sort();
+  
+  // Get unique units - filter by agency if an agency is selected
+  const unitsForFilter = filterAgency !== 'all'
+    ? goals.filter(g => g.agencyName === filterAgency)
+    : goals;
+  const units = Array.from(new Set(unitsForFilter.map(g => {
+    const unitName = g.unitName || `${g.unitManager}_${g.agencyName}`;
+    return unitName;
+  }))).sort();
+  
+  // Reset unit filter if the selected unit is not in the filtered units
+  useEffect(() => {
+    if (filterUnit !== 'all' && !units.includes(filterUnit)) {
+      setFilterUnit('all');
+    }
+  }, [filterAgency, units, filterUnit]);
 
   const exportToCSV = () => {
     if (filteredGoals.length === 0) return;
@@ -245,18 +395,39 @@ export default function ReportsPage() {
 
           {/* Filters */}
           <div className="bg-white rounded-lg shadow-md p-4 mb-6">
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
               <div>
                 <label className="block text-sm font-semibold text-slate-700 mb-2">Filter by Agency</label>
                 <select
                   value={filterAgency}
-                  onChange={(e) => setFilterAgency(e.target.value)}
+                  onChange={(e) => {
+                    setFilterAgency(e.target.value);
+                    setFilterUnit('all'); // Reset unit filter when agency changes
+                  }}
                   className="w-full p-2 border-2 border-slate-200 rounded-lg focus:border-[#D31145] focus:ring-2 focus:ring-[#D31145]/20"
                 >
                   <option value="all">All Agencies</option>
                   {agencies.map(agency => (
                     <option key={agency} value={agency}>{agency}</option>
                   ))}
+                </select>
+              </div>
+              <div>
+                <label className="block text-sm font-semibold text-slate-700 mb-2">Filter by Unit</label>
+                <select
+                  value={filterUnit}
+                  onChange={(e) => setFilterUnit(e.target.value)}
+                  className="w-full p-2 border-2 border-slate-200 rounded-lg focus:border-[#D31145] focus:ring-2 focus:ring-[#D31145]/20"
+                  disabled={units.length === 0}
+                >
+                  <option value="all">All Units</option>
+                  {units.map(unitName => {
+                    // Extract unit manager name from unitName format: "UnitManager_Agency"
+                    const unitManagerName = unitName.split('_').slice(0, -1).join('_');
+                    return (
+                      <option key={unitName} value={unitName}>{unitManagerName}</option>
+                    );
+                  })}
                 </select>
               </div>
               <div>
@@ -331,6 +502,9 @@ export default function ReportsPage() {
               {aggregated && Object.keys(aggregated.byAgency).length > 0 && (
                 <div className="bg-white rounded-lg shadow-md p-6 mb-6">
                   <h2 className="text-xl font-bold text-slate-900 mb-4">Summary by Agency</h2>
+                  <p className="text-sm text-slate-600 mb-4">
+                    Agency totals are consolidated from unit totals (units are consolidated from individual advisor/leader goals).
+                  </p>
                   <div className="overflow-x-auto">
                     <table className="w-full text-sm">
                       <thead>
@@ -338,6 +512,7 @@ export default function ReportsPage() {
                           <th className="text-left p-3 font-semibold text-slate-700">Agency</th>
                           <th className="text-right p-3 font-semibold text-slate-700">Users</th>
                           <th className="text-right p-3 font-semibold text-slate-700">Manpower</th>
+                          <th className="text-right p-3 font-semibold text-slate-700">New Recruits</th>
                           <th className="text-right p-3 font-semibold text-slate-700">Annual FYP</th>
                           <th className="text-right p-3 font-semibold text-slate-700">Annual FYC</th>
                           <th className="text-right p-3 font-semibold text-slate-700">Annual Income</th>
@@ -349,6 +524,7 @@ export default function ReportsPage() {
                             <td className="p-3 font-medium">{agency}</td>
                             <td className="p-3 text-right">{data.count}</td>
                             <td className="p-3 text-right">{Math.round(data.manpower)}</td>
+                            <td className="p-3 text-right">{Math.round(data.newRecruits)}</td>
                             <td className="p-3 text-right">₱{formatNumberWithCommas(Math.round(data.fyp))}</td>
                             <td className="p-3 text-right">₱{formatNumberWithCommas(Math.round(data.fyc))}</td>
                             <td className="p-3 text-right">₱{formatNumberWithCommas(Math.round(data.income))}</td>
@@ -357,6 +533,168 @@ export default function ReportsPage() {
                       </tbody>
                     </table>
                   </div>
+                </div>
+              )}
+
+              {/* Aggregated by Unit */}
+              {aggregated && Object.keys(aggregated.byUnit).length > 0 && (
+                <div className="bg-white rounded-lg shadow-md p-6 mb-6">
+                  <h2 className="text-xl font-bold text-slate-900 mb-4">Summary by Unit</h2>
+                  <p className="text-sm text-slate-600 mb-4">
+                    Unit totals are consolidated from individual advisor/leader goals within each unit.
+                  </p>
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-sm">
+                      <thead>
+                        <tr className="border-b-2 border-slate-200">
+                          <th className="text-left p-3 font-semibold text-slate-700">Unit Manager</th>
+                          <th className="text-left p-3 font-semibold text-slate-700">Agency</th>
+                          <th className="text-right p-3 font-semibold text-slate-700">Users</th>
+                          <th className="text-right p-3 font-semibold text-slate-700">Manpower</th>
+                          <th className="text-right p-3 font-semibold text-slate-700">New Recruits</th>
+                          <th className="text-right p-3 font-semibold text-slate-700">Annual FYP</th>
+                          <th className="text-right p-3 font-semibold text-slate-700">Annual FYC</th>
+                          <th className="text-right p-3 font-semibold text-slate-700">Annual Income</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {Object.entries(aggregated.byUnit)
+                          .sort(([, a], [, b]) => {
+                            // Sort by agency first, then by unit manager name
+                            if (a.agencyName !== b.agencyName) {
+                              return a.agencyName.localeCompare(b.agencyName);
+                            }
+                            return a.unitManager.localeCompare(b.unitManager);
+                          })
+                          .map(([unitName, data]) => (
+                            <tr key={unitName} className="border-b border-slate-100 hover:bg-slate-50">
+                              <td className="p-3 font-medium">{data.unitManager}</td>
+                              <td className="p-3">{data.agencyName}</td>
+                              <td className="p-3 text-right">{data.count}</td>
+                              <td className="p-3 text-right">{Math.round(data.manpower)}</td>
+                              <td className="p-3 text-right">{Math.round(data.newRecruits)}</td>
+                              <td className="p-3 text-right">₱{formatNumberWithCommas(Math.round(data.fyp))}</td>
+                              <td className="p-3 text-right">₱{formatNumberWithCommas(Math.round(data.fyc))}</td>
+                              <td className="p-3 text-right">₱{formatNumberWithCommas(Math.round(data.income))}</td>
+                            </tr>
+                          ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              )}
+
+              {/* Quarterly Summary Section */}
+              {aggregated && (
+                <div className="bg-white rounded-lg shadow-md p-6 mb-6">
+                  <div className="flex items-center justify-between mb-4">
+                    <div>
+                      <h2 className="text-xl font-bold text-slate-900">Quarterly Summary</h2>
+                      <p className="text-sm text-slate-600 mt-1">
+                        Consolidated quarterly totals across all units and agencies
+                      </p>
+                    </div>
+                    <div className="flex gap-3">
+                      <button
+                        onClick={() => {
+                          if (!aggregated) return;
+                          const headers = ['Quarter', 'Base Manpower', 'New Recruits', 'FYP', 'FYC', 'Cases'];
+                          const rows = [
+                            ['Q1', aggregated.quarterly.q1.baseManpower, aggregated.quarterly.q1.newRecruits, aggregated.quarterly.q1.fyp, aggregated.quarterly.q1.fyc, aggregated.quarterly.q1.cases],
+                            ['Q2', aggregated.quarterly.q2.baseManpower, aggregated.quarterly.q2.newRecruits, aggregated.quarterly.q2.fyp, aggregated.quarterly.q2.fyc, aggregated.quarterly.q2.cases],
+                            ['Q3', aggregated.quarterly.q3.baseManpower, aggregated.quarterly.q3.newRecruits, aggregated.quarterly.q3.fyp, aggregated.quarterly.q3.fyc, aggregated.quarterly.q3.cases],
+                            ['Q4', aggregated.quarterly.q4.baseManpower, aggregated.quarterly.q4.newRecruits, aggregated.quarterly.q4.fyp, aggregated.quarterly.q4.fyc, aggregated.quarterly.q4.cases],
+                          ];
+                          const csvContent = [
+                            headers.join(','),
+                            ...rows.map(row => row.map(cell => `"${cell}"`).join(','))
+                          ].join('\n');
+                          const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+                          const link = document.createElement('a');
+                          const url = URL.createObjectURL(blob);
+                          link.setAttribute('href', url);
+                          link.setAttribute('download', `quarterly_summary_${new Date().toISOString().split('T')[0]}.csv`);
+                          link.style.visibility = 'hidden';
+                          document.body.appendChild(link);
+                          link.click();
+                          document.body.removeChild(link);
+                        }}
+                        className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors font-semibold flex items-center gap-2"
+                      >
+                        <span>📥</span>
+                        <span>Download CSV</span>
+                      </button>
+                      <button
+                        onClick={() => setShowQuarterlySummary(!showQuarterlySummary)}
+                        className="px-4 py-2 bg-[#D31145] text-white rounded-lg hover:bg-red-700 transition-colors font-semibold flex items-center gap-2"
+                      >
+                        <span>{showQuarterlySummary ? '▼' : '▶'}</span>
+                        <span>{showQuarterlySummary ? 'Hide' : 'Show'} Summary</span>
+                      </button>
+                    </div>
+                  </div>
+
+                  {showQuarterlySummary && (
+                    <div className="overflow-x-auto mt-4">
+                      <table className="w-full text-sm">
+                        <thead>
+                          <tr className="border-b-2 border-slate-200 bg-slate-50">
+                            <th className="text-left p-3 font-semibold text-slate-700">Quarter</th>
+                            <th className="text-right p-3 font-semibold text-slate-700">Base Manpower</th>
+                            <th className="text-right p-3 font-semibold text-slate-700">New Recruits</th>
+                            <th className="text-right p-3 font-semibold text-slate-700">Total Manpower</th>
+                            <th className="text-right p-3 font-semibold text-slate-700">FYP</th>
+                            <th className="text-right p-3 font-semibold text-slate-700">FYC</th>
+                            <th className="text-right p-3 font-semibold text-slate-700">Cases</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {(['q1', 'q2', 'q3', 'q4'] as const).map((q) => {
+                            const data = aggregated.quarterly[q];
+                            const totalManpower = data.baseManpower + data.newRecruits;
+                            return (
+                              <tr key={q} className="border-b border-slate-100 hover:bg-slate-50">
+                                <td className="p-3 font-bold text-[#D31145]">{q.toUpperCase()}</td>
+                                <td className="p-3 text-right">{Math.round(data.baseManpower)}</td>
+                                <td className="p-3 text-right">{Math.round(data.newRecruits)}</td>
+                                <td className="p-3 text-right font-semibold">{Math.round(totalManpower)}</td>
+                                <td className="p-3 text-right">₱{formatNumberWithCommas(Math.round(data.fyp))}</td>
+                                <td className="p-3 text-right">₱{formatNumberWithCommas(Math.round(data.fyc))}</td>
+                                <td className="p-3 text-right">{Math.round(data.cases)}</td>
+                              </tr>
+                            );
+                          })}
+                          {/* Total Row */}
+                          <tr className="border-t-2 border-slate-300 bg-slate-100 font-bold">
+                            <td className="p-3">TOTAL</td>
+                            <td className="p-3 text-right">
+                              {Math.round(aggregated.quarterly.q1.baseManpower + aggregated.quarterly.q2.baseManpower + aggregated.quarterly.q3.baseManpower + aggregated.quarterly.q4.baseManpower)}
+                            </td>
+                            <td className="p-3 text-right">
+                              {Math.round(aggregated.quarterly.q1.newRecruits + aggregated.quarterly.q2.newRecruits + aggregated.quarterly.q3.newRecruits + aggregated.quarterly.q4.newRecruits)}
+                            </td>
+                            <td className="p-3 text-right">
+                              {Math.round(
+                                (aggregated.quarterly.q1.baseManpower + aggregated.quarterly.q1.newRecruits) +
+                                (aggregated.quarterly.q2.baseManpower + aggregated.quarterly.q2.newRecruits) +
+                                (aggregated.quarterly.q3.baseManpower + aggregated.quarterly.q3.newRecruits) +
+                                (aggregated.quarterly.q4.baseManpower + aggregated.quarterly.q4.newRecruits)
+                              )}
+                            </td>
+                            <td className="p-3 text-right">
+                              ₱{formatNumberWithCommas(Math.round(aggregated.quarterly.q1.fyp + aggregated.quarterly.q2.fyp + aggregated.quarterly.q3.fyp + aggregated.quarterly.q4.fyp))}
+                            </td>
+                            <td className="p-3 text-right">
+                              ₱{formatNumberWithCommas(Math.round(aggregated.quarterly.q1.fyc + aggregated.quarterly.q2.fyc + aggregated.quarterly.q3.fyc + aggregated.quarterly.q4.fyc))}
+                            </td>
+                            <td className="p-3 text-right">
+                              {Math.round(aggregated.quarterly.q1.cases + aggregated.quarterly.q2.cases + aggregated.quarterly.q3.cases + aggregated.quarterly.q4.cases)}
+                            </td>
+                          </tr>
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
                 </div>
               )}
 
@@ -373,6 +711,7 @@ export default function ReportsPage() {
                         <th className="text-left p-3 font-semibold text-slate-700">Rank</th>
                         <th className="text-left p-3 font-semibold text-slate-700">Unit Manager</th>
                         <th className="text-left p-3 font-semibold text-slate-700">Agency</th>
+                        <th className="text-right p-3 font-semibold text-slate-700">New Recruits</th>
                         <th className="text-right p-3 font-semibold text-slate-700">Annual FYP</th>
                         <th className="text-right p-3 font-semibold text-slate-700">Annual FYC</th>
                         <th className="text-right p-3 font-semibold text-slate-700">Annual Income</th>
@@ -383,31 +722,38 @@ export default function ReportsPage() {
                     <tbody>
                       {filteredGoals.length === 0 ? (
                         <tr>
-                          <td colSpan={9} className="p-8 text-center text-slate-500">
+                          <td colSpan={10} className="p-8 text-center text-slate-500">
                             No reports found. Users need to submit their strategic planning goals.
                           </td>
                         </tr>
                       ) : (
-                        filteredGoals.map((goal) => (
-                          <tr key={goal.id} className="border-b border-slate-100 hover:bg-slate-50">
-                            <td className="p-3 font-medium">{goal.userName}</td>
-                            <td className="p-3">{goal.userRank}</td>
-                            <td className="p-3">{goal.unitManager}</td>
-                            <td className="p-3">{goal.agencyName}</td>
-                            <td className="p-3 text-right">₱{formatNumberWithCommas(Math.round(goal.annualFYP))}</td>
-                            <td className="p-3 text-right">₱{formatNumberWithCommas(Math.round(goal.annualFYC))}</td>
-                            <td className="p-3 text-right">₱{formatNumberWithCommas(Math.round(goal.annualIncome))}</td>
-                            <td className="p-3">{goal.submittedAt.toLocaleDateString()}</td>
-                            <td className="p-3 text-center">
-                              <button
-                                onClick={() => setSelectedGoal(goal)}
-                                className="px-3 py-1 bg-[#D31145] text-white rounded hover:bg-red-700 text-xs font-semibold"
-                              >
-                                View
-                              </button>
-                            </td>
-                          </tr>
-                        ))
+                        filteredGoals.map((goal) => {
+                          const annualNewRecruits = (goal.q1?.newRecruits || 0) + 
+                                                   (goal.q2?.newRecruits || 0) + 
+                                                   (goal.q3?.newRecruits || 0) + 
+                                                   (goal.q4?.newRecruits || 0);
+                          return (
+                            <tr key={goal.id} className="border-b border-slate-100 hover:bg-slate-50">
+                              <td className="p-3 font-medium">{goal.userName}</td>
+                              <td className="p-3">{goal.userRank}</td>
+                              <td className="p-3">{goal.unitManager}</td>
+                              <td className="p-3">{goal.agencyName}</td>
+                              <td className="p-3 text-right">{Math.round(annualNewRecruits)}</td>
+                              <td className="p-3 text-right">₱{formatNumberWithCommas(Math.round(goal.annualFYP))}</td>
+                              <td className="p-3 text-right">₱{formatNumberWithCommas(Math.round(goal.annualFYC))}</td>
+                              <td className="p-3 text-right">₱{formatNumberWithCommas(Math.round(goal.annualIncome))}</td>
+                              <td className="p-3">{goal.submittedAt.toLocaleDateString()}</td>
+                              <td className="p-3 text-center">
+                                <button
+                                  onClick={() => setSelectedGoal(goal)}
+                                  className="px-3 py-1 bg-[#D31145] text-white rounded hover:bg-red-700 text-xs font-semibold"
+                                >
+                                  View
+                                </button>
+                              </td>
+                            </tr>
+                          );
+                        })
                       )}
                     </tbody>
                   </table>

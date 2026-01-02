@@ -22,14 +22,30 @@ export interface UserState {
   uid: string;
 }
 
-export function StrategicPlanningApp() {
+interface StrategicPlanningAppProps {
+  initialTab?: string;
+  initialView?: 'advisor' | 'leader';
+}
+
+export function StrategicPlanningApp({ initialTab, initialView }: StrategicPlanningAppProps = {}) {
   const router = useRouter();
   const { user, loading } = useAuth();
   const [userState, setUserState] = useState<UserState | null>(null);
-  const [activeTab, setActiveTab] = useState('overview');
+  const [activeTab, setActiveTab] = useState(initialTab || 'overview');
   const [showAIModal, setShowAIModal] = useState(false);
   const [aiModalContent, setAIModalContent] = useState('');
   const [aiModalTitle, setAIModalTitle] = useState('AI Assistant');
+  const [simulationData, setSimulationData] = useState<{
+    personalFYC?: number;
+    tenuredCount?: number;
+    tenuredProd?: number;
+    newCount?: number;
+    newProd?: number;
+    // Advisor simulation data
+    fyc?: number;
+    cases?: number;
+    persistency?: number;
+  } | null>(null);
 
   // Update user state when auth user changes
   useEffect(() => {
@@ -41,21 +57,33 @@ export function StrategicPlanningApp() {
       }
 
       // Set user state from authenticated user
-      // Admins can access Strategic Planning too - default to advisor view
+      // Handle initial view from URL params (for redirects from old Targets pages)
+      let initialRole: 'advisor' | 'leader' = user.role === 'admin' ? 'advisor' : user.role;
+      if (initialView === 'leader' && (user.role === 'admin' || user.role === 'leader')) {
+        initialRole = 'leader';
+      } else if (initialView === 'advisor') {
+        initialRole = 'advisor';
+      }
+      
       setUserState({
-        role: user.role === 'admin' ? 'advisor' : user.role, // Admins default to advisor view but can toggle
+        role: initialRole,
         rank: user.rank,
         name: user.name,
         um: user.unitManager || 'System',
         agency: user.agencyName,
         uid: user.uid,
       });
+      
+      // Set initial tab if provided via URL params
+      if (initialTab && ['overview', 'advisor', 'leader', 'growth', 'goals'].includes(initialTab)) {
+        setActiveTab(initialTab);
+      }
     }
-  }, [user, loading, router]);
+  }, [user, loading, router, initialTab, initialView]);
 
-  // Redirect Life Advisors away from leader-only tabs
+  // Redirect Advisors away from leader-only tabs
   useEffect(() => {
-    if (userState && user && user.rank === 'LA' && (activeTab === 'leader' || activeTab === 'growth')) {
+    if (userState && user && user.rank === 'ADV' && (activeTab === 'leader' || activeTab === 'growth')) {
       setActiveTab('overview');
     }
   }, [userState, user, activeTab]);
@@ -102,11 +130,11 @@ export function StrategicPlanningApp() {
 
   // Get user permissions
   const permissions = getUserPermissions(user.role);
-  const canToggleToLeader = permissions.canToggleLeaderView && user.rank !== 'LA';
+  const canToggleToLeader = permissions.canToggleLeaderView && user.rank !== 'ADV';
 
   // Change view role (only for leaders/admins)
   const changeRole = (newRole: 'advisor' | 'leader') => {
-    if (!userState || !permissions.canToggleLeaderView || user.rank === 'LA') {
+    if (!userState || !permissions.canToggleLeaderView || user.rank === 'ADV') {
       return;
     }
     
@@ -168,7 +196,7 @@ export function StrategicPlanningApp() {
             </div>
           ) : (
             <div className="flex items-center gap-2 bg-slate-100 rounded-lg p-1 border-2 border-slate-300 shadow-sm">
-              <div className="flex items-center gap-1.5 sm:gap-2 px-3 py-2 rounded-md bg-slate-300 text-slate-600 cursor-not-allowed whitespace-nowrap" title="Life Advisors can only view Advisor mode">
+                <div className="flex items-center gap-1.5 sm:gap-2 px-3 py-2 rounded-md bg-slate-300 text-slate-600 cursor-not-allowed whitespace-nowrap" title="Advisors can only view Advisor mode">
                 <span className="text-base sm:text-lg">🛡️</span>
                 <span className="text-xs sm:text-sm font-semibold">Advisor Only</span>
               </div>
@@ -208,10 +236,34 @@ export function StrategicPlanningApp() {
       
       <div className="mt-6">
         {activeTab === 'overview' && <OverviewTab userState={userState} />}
-        {activeTab === 'advisor' && <AdvisorSimTab />}
-        {activeTab === 'leader' && <LeaderHQTab userState={userState} onGenerateRecruitmentAd={() => showAI('Recruitment Ad', 'Recruitment ad generated (mock)')} />}
+        {activeTab === 'advisor' && (
+          <AdvisorSimTab 
+            onPushToGoals={(data) => {
+              setSimulationData(data);
+              setActiveTab('goals');
+            }}
+          />
+        )}
+        {activeTab === 'leader' && (
+          <LeaderHQTab 
+            userState={userState} 
+            onGenerateRecruitmentAd={() => showAI('Recruitment Ad', 'Recruitment ad generated (mock)')}
+            onPushToGoals={(data) => {
+              setSimulationData(data);
+              setActiveTab('goals');
+            }}
+          />
+        )}
         {activeTab === 'growth' && <PathToPremierTab userState={userState} />}
-        {activeTab === 'goals' && <GoalSettingTab userState={userState} onShowAI={showAI} />}
+        {activeTab === 'goals' && (
+          <GoalSettingTab 
+            userState={userState}
+            originalUserRole={user.role}
+            onShowAI={showAI}
+            simulationData={simulationData}
+            onSimulationDataUsed={() => setSimulationData(null)}
+          />
+        )}
       </div>
 
       <AIModal

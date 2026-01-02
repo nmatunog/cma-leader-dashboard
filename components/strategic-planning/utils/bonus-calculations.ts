@@ -44,10 +44,11 @@ export function getSelfOverrideRate(activeRecruits: number): number {
 }
 
 // ACS 3.0 Direct Production Incentive (DPI) Rates by Rank
-export function getDPIRate(rank: 'UM' | 'SUM' | 'AD', isNewRecruit: boolean): number {
-  if (rank === 'UM') return isNewRecruit ? 0.30 : 0.20;
-  if (rank === 'SUM') return isNewRecruit ? 0.325 : 0.225;
-  if (rank === 'AD') return isNewRecruit ? 0.35 : 0.25;
+export function getDPIRate(rank: 'ADD' | 'SUM' | 'UM' | 'AUM', isNewRecruit: boolean): number {
+  if (rank === 'ADD') return isNewRecruit ? 0.35 : 0.25; // Agency/District Director: 25%/35%
+  if (rank === 'SUM') return isNewRecruit ? 0.325 : 0.225; // Senior Unit Manager: 22.5%/32.5%
+  if (rank === 'UM') return isNewRecruit ? 0.30 : 0.20; // Unit Manager: 20%/30%
+  if (rank === 'AUM') return isNewRecruit ? 0.28 : 0.18; // Associate Unit Manager: 18%/28%
   return 0.20; // Default to UM tenured
 }
 

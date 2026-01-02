@@ -12,12 +12,25 @@ import {
   getDPIRate,
   getQPBRate,
 } from '../utils/bonus-calculations';
-import { saveStrategicPlanningGoal, type StrategicPlanningGoal } from '@/services/strategic-planning-service';
+import { saveStrategicPlanningGoal, getUserGoal, type StrategicPlanningGoal } from '@/services/strategic-planning-service';
 import { generateStrategicPlanningPDF } from '../utils/pdf-generator';
 
 interface GoalSettingTabProps {
   userState: UserState;
+  originalUserRole: 'advisor' | 'leader' | 'admin'; // Original role from auth, not the view role
   onShowAI: (title: string, content: string) => void;
+  simulationData?: {
+    personalFYC?: number;
+    tenuredCount?: number;
+    tenuredProd?: number;
+    newCount?: number;
+    newProd?: number;
+    // Advisor simulation data
+    fyc?: number;
+    cases?: number;
+    persistency?: number;
+  } | null;
+  onSimulationDataUsed?: () => void;
 }
 
 // Get next bonus level threshold and rate
@@ -69,13 +82,30 @@ function getBonusPrompt(currentFYC: number): { message: string; type: 'congrats'
   };
 }
 
-export function GoalSettingTab({ userState, onShowAI }: GoalSettingTabProps) {
-  const isLeader = userState.role === 'leader';
-  const [decTarget, setDecTarget] = useState('');
-  const [decCurrFYP, setDecCurrFYP] = useState('');
-  const [decCurrRecruits, setDecCurrRecruits] = useState('');
-  const [goal2025FYC, setGoal2025FYC] = useState('');
-  const [goal2025FYP, setGoal2025FYP] = useState('');
+export function GoalSettingTab({ userState, originalUserRole, onShowAI, simulationData, onSimulationDataUsed }: GoalSettingTabProps) {
+  // Use original user role to determine if they're actually a leader
+  // This prevents leaders from submitting as advisors
+  const isActualLeader = originalUserRole === 'leader' || originalUserRole === 'admin';
+  // Use view role for UI display purposes
+  const isLeaderView = userState.role === 'leader';
+  // For submission and data logic, always use actual leader status
+  const isLeader = isActualLeader;
+  
+  // Prevent leaders from submitting when in advisor view
+  const canSubmitAsAdvisor = !isActualLeader; // Only true advisors can submit as advisors
+  const isInAdvisorView = userState.role === 'advisor';
+  const shouldPreventSubmission = isActualLeader && isInAdvisorView; // Leaders cannot submit in advisor view
+  
+  // Monthly Goals - Personal (for advisors, or Personal for leaders)
+  const [monthlyGoalTarget, setMonthlyGoalTarget] = useState('');
+  const [monthlyCurrentFYP, setMonthlyCurrentFYP] = useState('');
+  const [monthlyGoalFYC, setMonthlyGoalFYC] = useState('');
+  const [monthlyGoalFYP, setMonthlyGoalFYP] = useState('');
+  
+  // Monthly Goals - Team (only for leaders)
+  const [monthlyTeamGoalFYC, setMonthlyTeamGoalFYC] = useState('');
+  const [monthlyTeamGoalFYP, setMonthlyTeamGoalFYP] = useState('');
+  
   const [commRate, setCommRate] = useState(25);
   
   // Personal FYC (for advisor bonuses: PPB, Case Count, Persistency)
@@ -110,6 +140,9 @@ export function GoalSettingTab({ userState, onShowAI }: GoalSettingTabProps) {
   // Submission state
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [submitMessage, setSubmitMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+  const [manualEditConfirmation, setManualEditConfirmation] = useState<string | null>(null);
+  const [quarterlyGoalsAutoPopulated, setQuarterlyGoalsAutoPopulated] = useState(false);
+  const [dataLoaded, setDataLoaded] = useState(false);
   
   // Case Count and Persistency for Personal FYC bonuses (both Advisor and Leader)
   const [q1Cases, setQ1Cases] = useState('');
@@ -139,18 +172,19 @@ export function GoalSettingTab({ userState, onShowAI }: GoalSettingTabProps) {
   const chartInstanceRef = useRef<Chart | null>(null);
   
   // Leader rank state (default to UM, can be extended to allow selection)
-  const [leaderRank] = useState<'UM' | 'SUM' | 'AD'>('UM');
+  const [leaderRank] = useState<'ADD' | 'SUM' | 'UM' | 'AUM'>('UM');
 
   useEffect(() => {
-    const dec = parseCommaNumber(goal2025FYC) || 0;
-    const rate = commRate / 100;
+    const monthlyFYC = parseCommaNumber(monthlyGoalFYC) || 0;
+    // Use 25% rate for specific goals (MDRT_ON_TRACK, PREMIER_ADVISOR, MILLIONAIRE), otherwise use commRate
+    const rate = (monthlyGoalTarget === 'MDRT_ON_TRACK' || monthlyGoalTarget === 'PREMIER_ADVISOR' || monthlyGoalTarget === 'MILLIONAIRE') ? 0.25 : commRate / 100;
     
     let total = 0;
     let totalPersonal = 0;
     let totalTeam = 0;
     let income = 0;
     let bonus = 0;
-    const qData = [dec];
+    const qData = [monthlyFYC];
     
     const persMultiplier = getPersistencyMultiplier(persistency);
     
@@ -276,13 +310,13 @@ export function GoalSettingTab({ userState, onShowAI }: GoalSettingTabProps) {
     }
     
     if (isLeader) {
-      // Add Dec sprint to personal FYC
-      leaderTotalPersonalFYC += dec;
+      // Note: Monthly goal is separate from quarterly goals, so don't add it to annual totals
+      // The quarterly goals already represent 12 months (4 quarters × 3 months each)
       
-      setTotalPersonalFYC(totalPersonal + dec);
+      setTotalPersonalFYC(totalPersonal);
       setTotalTeamFYC(totalTeam);
-      setTotalFYC(totalPersonal + totalTeam + dec);
-      setTotalFYP((totalPersonal + totalTeam + dec) / rate);
+      setTotalFYC(totalPersonal + totalTeam);
+      setTotalFYP((totalPersonal + totalTeam) / rate);
       
       // Calculate leader income totals
       const leaderAnnualTotal = leaderTotalPersonalFYC + leaderTotalPersonalBonuses + leaderTotalDPI + leaderTotalQPB;
@@ -297,8 +331,10 @@ export function GoalSettingTab({ userState, onShowAI }: GoalSettingTabProps) {
       setLeaderAvgQuarterly(leaderQuarterlyAvg);
       setLeaderAvgMonthly(leaderMonthlyAvg);
     } else {
-      setTotalFYC(total + dec);
-      setTotalFYP((total + dec) / rate);
+      // Note: Monthly goal is separate from quarterly goals, so don't add it to annual totals
+      // The quarterly goals already represent 12 months (4 quarters × 3 months each)
+      setTotalFYC(total);
+      setTotalFYP(total / rate);
     }
     
     setTotalBonus(bonus);
@@ -317,7 +353,8 @@ export function GoalSettingTab({ userState, onShowAI }: GoalSettingTabProps) {
       
       if (isLeader) {
         // Leader: Show Personal and Team FYC separately
-        const personalData = [dec];
+        const monthlyFYC = parseCommaNumber(monthlyGoalFYC) || 0;
+        const personalData = [monthlyFYC];
         const teamData = [0];
         
         for (let q = 1; q <= 4; q++) {
@@ -391,7 +428,7 @@ export function GoalSettingTab({ userState, onShowAI }: GoalSettingTabProps) {
       chartInstanceRef.current = new Chart(ctx, config);
     }
   }, [
-    goal2025FYC, commRate, isLeader, persistency,
+    monthlyGoalFYC, commRate, monthlyGoalTarget, isLeader, persistency, // monthlyGoalTarget needed to determine rate (25% for specific goals, commRate for Others)
     q1FYC, q2FYC, q3FYC, q4FYC, // Advisor FYC
     q1Cases, q2Cases, q3Cases, q4Cases, // Advisor & Leader Cases
     q1PersonalFYC, q2PersonalFYC, q3PersonalFYC, q4PersonalFYC, // Leader Personal
@@ -399,105 +436,267 @@ export function GoalSettingTab({ userState, onShowAI }: GoalSettingTabProps) {
     q1Recruits, q2Recruits, q3Recruits, q4Recruits, // Leader Recruits
   ]);
 
-  const syncDec = (isFYC: boolean) => {
-    const rate = commRate / 100;
-    if (isFYC) {
-      const v = parseCommaNumber(goal2025FYC) || 0;
-      setGoal2025FYP(formatNumberWithCommas((v / rate).toFixed(0)));
-    } else {
-      const v = parseCommaNumber(goal2025FYP) || 0;
-      setGoal2025FYC(formatNumberWithCommas((v * rate).toFixed(0)));
-    }
-  };
 
-  const updateDecSprint = () => {
-    const type = decTarget;
-    const curr = parseCommaNumber(decCurrFYP) || 0;
-    const currRec = parseInt(decCurrRecruits) || 0;
-    let target = 0;
-    let isFYP = true;
-    let recTarget = 0;
-    let isTeamFYP = false; // Flag for leader Team FYP
-
-    if (type === 'MDRT') target = 3300000;
-    else if (type === 'Premier') {
-      target = 1200000; // Updated to 1.2M FYP
-      isTeamFYP = isLeader; // For leaders, Premier is Team FYP
-    }
-    else if (type === 'UM') { target = 1000000; recTarget = 6; }
-    else if (type === 'AUM') { target = 60000; isFYP = false; }
-
-    if (target > 0) {
-      const gap = Math.max(0, target - curr);
+  const updateMonthlyGoal = () => {
+    const type = monthlyGoalTarget;
+    
+    if (type === 'MDRT_ON_TRACK') {
+      // MDRT on Track: FYP = 3.52M / 12, FYC = 25% of FYP
+      const monthlyFYP = 3518400 / 12; // 293,333.33
+      const monthlyFYC = monthlyFYP * 0.25; // 73,333.33
+      const quarterlyFYC = Math.round(monthlyFYC * 3); // Quarterly = 3 x monthly = 220,000
       
-      if (isTeamFYP && isLeader) {
-        // For leaders, Premier sets Team FYP and Team FYC (at 25% of FYP)
-        const teamFYP = gap;
-        const teamFYC = teamFYP * 0.25; // FYC = 25% of FYP
-        
-        // Set Team FYP (use Q4 Team FYC field as Dec Team FYP target)
-        // We'll need to update Q4 Team FYC to reflect this
-        setGoal2025FYP(formatNumberWithCommas(teamFYP.toString()));
-        setGoal2025FYC(formatNumberWithCommas(teamFYC.toString()));
-      } else if (isFYP) {
-        setGoal2025FYP(formatNumberWithCommas(gap.toString()));
-        syncDec(false);
+      setMonthlyGoalFYP(formatNumberWithCommas(Math.round(monthlyFYP).toString()));
+      setMonthlyGoalFYC(formatNumberWithCommas(Math.round(monthlyFYC).toString()));
+      setManualEditConfirmation(null);
+      
+      // Auto-populate quarterly goals with 3x monthly goal
+      const quarterlyFYCFormatted = formatNumberWithCommas(quarterlyFYC.toString());
+      if (isLeader) {
+        setQ1PersonalFYC(quarterlyFYCFormatted);
+        setQ2PersonalFYC(quarterlyFYCFormatted);
+        setQ3PersonalFYC(quarterlyFYCFormatted);
+        setQ4PersonalFYC(quarterlyFYCFormatted);
       } else {
-        setGoal2025FYC(formatNumberWithCommas(gap.toString()));
-        syncDec(true);
+        setQ1FYC(quarterlyFYCFormatted);
+        setQ2FYC(quarterlyFYCFormatted);
+        setQ3FYC(quarterlyFYCFormatted);
+        setQ4FYC(quarterlyFYCFormatted);
       }
+      setQuarterlyGoalsAutoPopulated(true);
+    } else if (type === 'PREMIER_ADVISOR') {
+      // Premier Advisor by Year End: FYP = 100,000, FYC = 25% of FYP
+      const monthlyFYP = 100000;
+      const monthlyFYC = monthlyFYP * 0.25; // 25,000
+      
+      setMonthlyGoalFYP(formatNumberWithCommas(monthlyFYP.toString()));
+      setMonthlyGoalFYC(formatNumberWithCommas(monthlyFYC.toString()));
+      setManualEditConfirmation(null);
+      setQuarterlyGoalsAutoPopulated(false);
+    } else if (type === 'MILLIONAIRE') {
+      // Be A Millionaire: FYC = 1M / 12, FYP = FYC / 0.25
+      const monthlyFYC = 1000000 / 12; // 83,333.33
+      const monthlyFYP = monthlyFYC / 0.25; // 333,333.33
+      
+      setMonthlyGoalFYC(formatNumberWithCommas(Math.round(monthlyFYC).toString()));
+      setMonthlyGoalFYP(formatNumberWithCommas(Math.round(monthlyFYP).toString()));
+      setManualEditConfirmation(null);
+      setQuarterlyGoalsAutoPopulated(false);
+    } else if (type === 'OTHERS') {
+      // Others: Allow manual editing, clear auto-populated values if any
+      setManualEditConfirmation(null);
+      setQuarterlyGoalsAutoPopulated(false);
+    } else {
+      // No selection or empty
+      setManualEditConfirmation(null);
+      setQuarterlyGoalsAutoPopulated(false);
     }
   };
 
   useEffect(() => {
-    updateDecSprint();
-  }, [decTarget, decCurrFYP, decCurrRecruits, isLeader, commRate]);
+    updateMonthlyGoal();
+  }, [monthlyGoalTarget]);
 
-  // Load defaults from Advisor Sim when component mounts (for advisors)
+  // Load simulation data from Leader HQ or Advisor Sim tab
   useEffect(() => {
-    if (!isLeader && typeof window !== 'undefined') {
-      const savedFYC = localStorage.getItem('advisor_sim_fyc');
-      const savedCases = localStorage.getItem('advisor_sim_cases');
-      const savedPersistency = localStorage.getItem('advisor_sim_persistency');
+    if (simulationData) {
+      if (isLeader && simulationData.personalFYC !== undefined) {
+        // Leader simulation data
+      // Convert monthly Personal FYC to quarterly (multiply by 3)
+      const quarterlyPersonalFYC = simulationData.personalFYC * 3;
+      const formattedPersonalFYC = formatNumberWithCommas(Math.round(quarterlyPersonalFYC).toString());
       
-      // Only set defaults if fields are empty (one-time load)
-      if (savedFYC && !q1FYC && !q2FYC && !q3FYC && !q4FYC) {
-        const formatted = formatNumberWithCommas(savedFYC);
-        setQ1FYC(formatted);
-        setQ2FYC(formatted);
-        setQ3FYC(formatted);
-        setQ4FYC(formatted);
-      }
+      // Set Personal FYC for all quarters
+      setQ1PersonalFYC(formattedPersonalFYC);
+      setQ2PersonalFYC(formattedPersonalFYC);
+      setQ3PersonalFYC(formattedPersonalFYC);
+      setQ4PersonalFYC(formattedPersonalFYC);
       
-      if (savedCases && !q1Cases && !q2Cases && !q3Cases && !q4Cases) {
-        setQ1Cases(savedCases);
-        setQ2Cases(savedCases);
-        setQ3Cases(savedCases);
-        setQ4Cases(savedCases);
-      }
+      // Convert monthly Team FYC to quarterly (multiply by 3)
+      const monthlyTeamFYC = (simulationData.tenuredCount * simulationData.tenuredProd) + (simulationData.newCount * simulationData.newProd);
+      const quarterlyTeamFYC = monthlyTeamFYC * 3;
+      const formattedTeamFYC = formatNumberWithCommas(Math.round(quarterlyTeamFYC).toString());
       
-      if (savedPersistency) {
-        const parsedPersistency = parseFloat(savedPersistency);
-        if (!isNaN(parsedPersistency) && persistency === 82.5) {
-          setPersistency(parsedPersistency);
+      // Set Team FYC for all quarters
+      setQ1TeamFYC(formattedTeamFYC);
+      setQ2TeamFYC(formattedTeamFYC);
+      setQ3TeamFYC(formattedTeamFYC);
+      setQ4TeamFYC(formattedTeamFYC);
+      
+      // Set monthly goal FYC (use personal FYC)
+      setMonthlyGoalFYC(formatNumberWithCommas(Math.round(simulationData.personalFYC).toString()));
+      
+      // Set team monthly goal FYC (reuse monthlyTeamFYC calculated above)
+      setMonthlyTeamGoalFYC(formatNumberWithCommas(Math.round(monthlyTeamFYC).toString()));
+      const monthlyTeamFYP = monthlyTeamFYC / (commRate / 100);
+      setMonthlyTeamGoalFYP(formatNumberWithCommas(Math.round(monthlyTeamFYP).toString()));
+      
+        // Clear simulation data after using it
+        if (onSimulationDataUsed) {
+          onSimulationDataUsed();
+        }
+      } else if (!isLeader && simulationData.fyc !== undefined) {
+        // Advisor simulation data
+        // Convert quarterly FYC to quarterly goals (fyc is already quarterly)
+        const formattedFYC = formatNumberWithCommas(Math.round(simulationData.fyc).toString());
+        
+        // Set FYC for all quarters
+        setQ1FYC(formattedFYC);
+        setQ2FYC(formattedFYC);
+        setQ3FYC(formattedFYC);
+        setQ4FYC(formattedFYC);
+        
+        // Set cases for all quarters
+        if (simulationData.cases !== undefined) {
+          const casesStr = Math.round(simulationData.cases).toString();
+          setQ1Cases(casesStr);
+          setQ2Cases(casesStr);
+          setQ3Cases(casesStr);
+          setQ4Cases(casesStr);
+        }
+        
+        // Set persistency
+        if (simulationData.persistency !== undefined) {
+          setPersistency(simulationData.persistency);
+        }
+        
+        // Set monthly goal FYC (convert quarterly to monthly: divide by 3)
+        const monthlyFYC = simulationData.fyc / 3;
+        setMonthlyGoalFYC(formatNumberWithCommas(Math.round(monthlyFYC).toString()));
+        
+        // Clear simulation data after using it
+        if (onSimulationDataUsed) {
+          onSimulationDataUsed();
         }
       }
     }
-  }, []); // Only run once on mount
+  }, [simulationData, isLeader, onSimulationDataUsed, commRate]);
+
+  // Load saved goal data for the logged-in user
+  useEffect(() => {
+    const loadSavedGoal = async () => {
+      if (!userState?.uid || !userState?.agency) return;
+      // Don't load saved data if we just pushed simulation data
+      if (simulationData) return;
+      
+      try {
+        const savedGoal = await getUserGoal(userState.uid, userState.agency);
+        if (savedGoal) {
+          setDataLoaded(true);
+          // Load monthly goal data
+          if (savedGoal.monthlyTargetFYP > 0) {
+            setMonthlyGoalFYP(formatNumberWithCommas(savedGoal.monthlyTargetFYP.toString()));
+          }
+          if (savedGoal.monthlyTargetFYC > 0) {
+            setMonthlyGoalFYC(formatNumberWithCommas(savedGoal.monthlyTargetFYC.toString()));
+          }
+          
+          // Load team monthly goals (for leaders)
+          if (isLeader && savedGoal.monthlyTeamTargetFYP && savedGoal.monthlyTeamTargetFYC) {
+            if (savedGoal.monthlyTeamTargetFYP > 0) {
+              setMonthlyTeamGoalFYP(formatNumberWithCommas(savedGoal.monthlyTeamTargetFYP.toString()));
+            }
+            if (savedGoal.monthlyTeamTargetFYC > 0) {
+              setMonthlyTeamGoalFYC(formatNumberWithCommas(savedGoal.monthlyTeamTargetFYC.toString()));
+            }
+          }
+          
+          // Load commission rate and persistency
+          if (savedGoal.commissionRate) {
+            setCommRate(savedGoal.commissionRate);
+          }
+          if (savedGoal.persistency) {
+            setPersistency(savedGoal.persistency);
+          }
+          
+          // Load quarterly data
+          if (isLeader) {
+            // Leader: Personal and Team FYC
+            // Note: Saved goal has combined fyc, we'll split it proportionally or use all as personal
+            // For now, assume all saved FYC is personal (can be enhanced later)
+            if (savedGoal.q1.fyc > 0) {
+              setQ1PersonalFYC(formatNumberWithCommas(savedGoal.q1.fyc.toString()));
+            }
+            if (savedGoal.q2.fyc > 0) {
+              setQ2PersonalFYC(formatNumberWithCommas(savedGoal.q2.fyc.toString()));
+            }
+            if (savedGoal.q3.fyc > 0) {
+              setQ3PersonalFYC(formatNumberWithCommas(savedGoal.q3.fyc.toString()));
+            }
+            if (savedGoal.q4.fyc > 0) {
+              setQ4PersonalFYC(formatNumberWithCommas(savedGoal.q4.fyc.toString()));
+            }
+            
+            // Base manpower and recruits
+            if (savedGoal.q1.baseManpower) setQ1BaseManpower(savedGoal.q1.baseManpower.toString());
+            if (savedGoal.q2.baseManpower) setQ2BaseManpower(savedGoal.q2.baseManpower.toString());
+            if (savedGoal.q3.baseManpower) setQ3BaseManpower(savedGoal.q3.baseManpower.toString());
+            if (savedGoal.q4.baseManpower) setQ4BaseManpower(savedGoal.q4.baseManpower.toString());
+            
+            if (savedGoal.q1.newRecruits) setQ1Recruits(savedGoal.q1.newRecruits.toString());
+            if (savedGoal.q2.newRecruits) setQ2Recruits(savedGoal.q2.newRecruits.toString());
+            if (savedGoal.q3.newRecruits) setQ3Recruits(savedGoal.q3.newRecruits.toString());
+            if (savedGoal.q4.newRecruits) setQ4Recruits(savedGoal.q4.newRecruits.toString());
+          } else {
+            // Advisor: Single FYC per quarter
+            if (savedGoal.q1.fyc > 0) {
+              setQ1FYC(formatNumberWithCommas(savedGoal.q1.fyc.toString()));
+            }
+            if (savedGoal.q2.fyc > 0) {
+              setQ2FYC(formatNumberWithCommas(savedGoal.q2.fyc.toString()));
+            }
+            if (savedGoal.q3.fyc > 0) {
+              setQ3FYC(formatNumberWithCommas(savedGoal.q3.fyc.toString()));
+            }
+            if (savedGoal.q4.fyc > 0) {
+              setQ4FYC(formatNumberWithCommas(savedGoal.q4.fyc.toString()));
+            }
+          }
+          
+          // Load case counts (same for both advisor and leader)
+          if (savedGoal.q1.cases) setQ1Cases(savedGoal.q1.cases.toString());
+          if (savedGoal.q2.cases) setQ2Cases(savedGoal.q2.cases.toString());
+          if (savedGoal.q3.cases) setQ3Cases(savedGoal.q3.cases.toString());
+          if (savedGoal.q4.cases) setQ4Cases(savedGoal.q4.cases.toString());
+        }
+      } catch (error) {
+        console.error('Error loading saved goal:', error);
+        // Silently fail - user can still enter new data
+      }
+    };
+    
+    loadSavedGoal();
+  }, [userState?.uid, userState?.agency, isLeader, simulationData]);
+
+  // Note: Removed automatic loading from localStorage for advisors
+  // Data will only be loaded when "Push to Goal Setting" button is clicked in Advisor Sim
 
   const generateAdvisorStrategy = () => {
     onShowAI('AI Strategy Coach', 'Your personalized strategy has been generated based on your goals and current performance.');
   };
 
   const handleSubmitGoals = async () => {
+    // Prevent leaders from submitting as advisors
+    if (shouldPreventSubmission) {
+      setSubmitMessage({
+        type: 'error',
+        text: 'Leaders cannot submit goals as advisors. Please switch to Leader view to submit your goals.',
+      });
+      return;
+    }
+    
     setIsSubmitting(true);
     setSubmitMessage(null);
     
     try {
       // Collect all data
-      const dec2025FYP = parseCommaNumber(goal2025FYP) || 0;
-      const dec2025FYC = parseCommaNumber(goal2025FYC) || 0;
-      const dec2025Cases = parseInt(q4Cases) || 0; // Use Q4 cases as Dec target
+      const monthlyTargetFYP = parseCommaNumber(monthlyGoalFYP) || 0;
+      const monthlyTargetFYC = parseCommaNumber(monthlyGoalFYC) || 0;
+      const monthlyTargetCases = parseInt(q4Cases) || 0; // Use Q4 cases as monthly target
+      
+      // Team monthly goals (for leaders only)
+      const monthlyTeamTargetFYP = isLeader ? (parseCommaNumber(monthlyTeamGoalFYP) || 0) : undefined;
+      const monthlyTeamTargetFYC = isLeader ? (parseCommaNumber(monthlyTeamGoalFYC) || 0) : undefined;
       
       // Calculate quarterly data
       const rate = commRate / 100;
@@ -551,16 +750,24 @@ export function GoalSettingTab({ userState, onShowAI }: GoalSettingTabProps) {
       const avgMonthlyIncome = avgMonthly;
       
       // Prepare goal data
+      // Create normalized unit identifier to prevent double counting
+      const unitName = `${userState.um}_${userState.agency}`;
+      
       const goalData: StrategicPlanningGoal = {
         userId: userState.uid, // Use UID instead of name for unique identification
         userName: userState.name,
         userRank: userState.rank,
         unitManager: userState.um,
+        unitName: unitName, // Normalized unit identifier for aggregation
         agencyName: userState.agency,
         submittedAt: new Date(),
-        dec2025FYP,
-        dec2025FYC,
-        dec2025Cases,
+          monthlyTargetFYP,
+          monthlyTargetFYC,
+          monthlyTargetCases,
+          ...(isLeader && monthlyTeamTargetFYP !== undefined && monthlyTeamTargetFYC !== undefined ? {
+            monthlyTeamTargetFYP,
+            monthlyTeamTargetFYC,
+          } : {}),
         q1: quarters[0],
         q2: quarters[1],
         q3: quarters[2],
@@ -601,11 +808,26 @@ export function GoalSettingTab({ userState, onShowAI }: GoalSettingTabProps) {
     }
   };
 
+  // Get current month and year for display
+  const getCurrentMonthYear = () => {
+    const now = new Date();
+    const monthNames = ['January', 'February', 'March', 'April', 'May', 'June', 
+                        'July', 'August', 'September', 'October', 'November', 'December'];
+    return `${monthNames[now.getMonth()]} ${now.getFullYear()}`;
+  };
+
   return (
     <section className="space-y-4 sm:space-y-6">
       <div className="bg-white rounded-xl shadow-sm p-4 sm:p-6 border-l-4 border-[#D31145]">
         <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-3 sm:gap-4">
-          <h2 className="text-xl sm:text-2xl font-bold text-slate-900">2026 Strategic Goal Setting</h2>
+          <div className="flex-1">
+            <h2 className="text-xl sm:text-2xl font-bold text-slate-900">Strategic Goal Setting</h2>
+            {dataLoaded && (
+              <p className="text-xs sm:text-sm text-green-600 font-medium mt-1">
+                ✓ Loaded your last saved goals
+              </p>
+            )}
+          </div>
           {!isLeader && (
             <button
               onClick={generateAdvisorStrategy}
@@ -617,68 +839,63 @@ export function GoalSettingTab({ userState, onShowAI }: GoalSettingTabProps) {
         </div>
       </div>
 
-      {/* Dec Sprint */}
-      <div className="bg-gradient-to-br from-red-50 to-white border border-red-100 rounded-xl shadow-md p-4 sm:p-6">
-        <h3 className="text-lg sm:text-xl font-bold text-[#D31145] mb-3 sm:mb-4">Dec 2025 Sprint 🚀</h3>
+      {/* Monthly Goals */}
+      {isLeader ? (
+        // Leader: Show Personal and Team monthly goals separately
+        <div className="space-y-4 sm:space-y-6">
+          {/* Personal Monthly Goal */}
+          <div className="bg-gradient-to-br from-blue-50 to-white border border-blue-200 rounded-xl shadow-md p-4 sm:p-6">
+            <h3 className="text-lg sm:text-xl font-bold text-blue-700 mb-3 sm:mb-4">
+              Personal Goal for {getCurrentMonthYear()}
+            </h3>
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 sm:gap-6">
           <div className="space-y-3">
             <select
-              value={decTarget}
-              onChange={(e) => setDecTarget(e.target.value)}
+              value={monthlyGoalTarget}
+              onChange={(e) => setMonthlyGoalTarget(e.target.value)}
               className="w-full p-3 border-2 border-slate-200 rounded-lg focus:border-[#D31145] focus:ring-2 focus:ring-[#D31145]/20 transition-all shadow-sm text-sm font-medium"
             >
               <option value="">Select Goal...</option>
-              <option value="MDRT">MDRT (3.3M FYP)</option>
-              <option value="Premier">Premier ({isLeader ? '1.2M Team FYP' : '1.2M FYP'})</option>
-              <option value="UM">Promote to UM (1M Team FYP)</option>
-              <option value="AUM">Promote to AUM (60k FYC)</option>
+              <option value="MDRT_ON_TRACK">MDRT on Track</option>
+              <option value="PREMIER_ADVISOR">Premier Advisor by Year End</option>
+              <option value="MILLIONAIRE">Be A Millionaire</option>
+              <option value="OTHERS">Others</option>
             </select>
             <input
               type="text"
-              value={formatNumberWithCommas(decCurrFYP)}
+              value={formatNumberWithCommas(monthlyCurrentFYP)}
               onChange={(e) => {
-                handleNumberInputChange(e.target.value, setDecCurrFYP);
+                handleNumberInputChange(e.target.value, setMonthlyCurrentFYP);
               }}
-              placeholder={isLeader && decTarget === 'Premier' ? 'Current Team FYP' : 'Current FYP'}
+              placeholder="Current FYP (optional)"
               className="w-full p-3 border-2 border-slate-200 rounded-lg focus:border-[#D31145] focus:ring-2 focus:ring-[#D31145]/20 transition-all shadow-sm text-sm"
             />
-            {(decTarget === 'UM' || decTarget === 'AUM') && (
-              <div className="p-2 bg-red-50 border rounded text-xs flex justify-between items-center">
-                <span>Goal: {decTarget === 'UM' ? '6' : '0'} Recruits</span>
-                <div className="flex items-center gap-2">
-                  <input
-                    type="number"
-                    value={decCurrRecruits}
-                    onChange={(e) => setDecCurrRecruits(e.target.value)}
-                    placeholder="Curr"
-                    className="w-16 p-1 border rounded text-right"
-                  />
-                  <span className="font-bold text-[#D31145]">
-                    {parseInt(decCurrRecruits) >= (decTarget === 'UM' ? 6 : 0) ? 'Met!' : `Need ${Math.max(0, (decTarget === 'UM' ? 6 : 0) - parseInt(decCurrRecruits))} more!`}
-                  </span>
-                </div>
-              </div>
-            )}
           </div>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4">
             <div>
               <label className="text-xs font-bold text-[#D31145] mb-2 block">
-                Target {isLeader && decTarget === 'Premier' ? 'Team ' : ''}FYC
-                {isLeader && decTarget === 'Premier' && <span className="text-[10px] text-slate-600"> (25% of FYP)</span>}
+                Target FYC
+                {monthlyGoalTarget === 'MDRT_ON_TRACK' && <span className="text-[10px] text-slate-600"> (25% of FYP)</span>}
+                {monthlyGoalTarget === 'PREMIER_ADVISOR' && <span className="text-[10px] text-slate-600"> (25% of FYP)</span>}
               </label>
               <input
                 type="text"
-                value={formatNumberWithCommas(goal2025FYC)}
+                value={formatNumberWithCommas(monthlyGoalFYC)}
                 onChange={(e) => {
                   handleNumberInputChange(e.target.value, (val) => {
-                    setGoal2025FYC(val);
-                    if (isLeader && decTarget === 'Premier') {
-                      // For Premier leader, recalculate FYP from FYC (FYP = FYC / 0.25)
-                      const fyp = parseCommaNumber(val) / 0.25;
-                      setGoal2025FYP(formatNumberWithCommas(fyp.toString()));
-                    } else {
-                      syncDec(true);
+                    const oldFYC = parseCommaNumber(monthlyGoalFYC) || 0;
+                    const newFYC = parseCommaNumber(val) || 0;
+                    setMonthlyGoalFYC(val);
+                    
+                    // Show confirmation for manual edits on auto-populated goals
+                    if (monthlyGoalTarget !== 'OTHERS' && monthlyGoalTarget !== '' && oldFYC !== newFYC && oldFYC > 0) {
+                      setManualEditConfirmation(`FYC manually adjusted to ₱${formatNumberWithCommas(newFYC.toString())}. FYP recalculated accordingly.`);
+                      setTimeout(() => setManualEditConfirmation(null), 5000);
                     }
+                    
+                      // Always calculate FYP from FYC using 25% rate (FYP = FYC / 0.25)
+                      const fyp = newFYC / 0.25;
+                      setMonthlyGoalFYP(formatNumberWithCommas(Math.round(fyp).toString()));
                   });
                 }}
                 className="w-full p-2.5 sm:p-3 border-2 border-[#D31145]/30 rounded-lg focus:border-[#D31145] focus:ring-2 focus:ring-[#D31145]/20 transition-all shadow-sm font-bold bg-white text-sm sm:text-base"
@@ -686,34 +903,193 @@ export function GoalSettingTab({ userState, onShowAI }: GoalSettingTabProps) {
             </div>
             <div>
               <label className="text-xs font-bold text-[#D31145] mb-2 block">
-                Target {isLeader && decTarget === 'Premier' ? 'Team ' : ''}FYP
+                Target FYP
               </label>
               <input
                 type="text"
-                value={formatNumberWithCommas(goal2025FYP)}
+                value={formatNumberWithCommas(monthlyGoalFYP)}
                 onChange={(e) => {
                   handleNumberInputChange(e.target.value, (val) => {
-                    setGoal2025FYP(val);
-                    if (isLeader && decTarget === 'Premier') {
-                      // For Premier leader, calculate FYC as 25% of FYP
-                      const fyc = parseCommaNumber(val) * 0.25;
-                      setGoal2025FYC(formatNumberWithCommas(fyc.toString()));
-                    } else {
-                      syncDec(false);
+                    const oldFYP = parseCommaNumber(monthlyGoalFYP) || 0;
+                    const newFYP = parseCommaNumber(val) || 0;
+                    setMonthlyGoalFYP(val);
+                    
+                    // Show confirmation for manual edits on auto-populated goals
+                    if (monthlyGoalTarget !== 'OTHERS' && monthlyGoalTarget !== '' && oldFYP !== newFYP && oldFYP > 0) {
+                      setManualEditConfirmation(`FYP manually adjusted to ₱${formatNumberWithCommas(newFYP.toString())}. FYC recalculated accordingly.`);
+                      setTimeout(() => setManualEditConfirmation(null), 5000);
                     }
+                    
+                    // Always calculate FYC from FYP using 25% rate (FYC = FYP * 0.25)
+                    const fyc = newFYP * 0.25;
+                    setMonthlyGoalFYC(formatNumberWithCommas(Math.round(fyc).toString()));
                   });
                 }}
                 className="w-full p-2.5 sm:p-3 border-2 border-[#D31145]/30 rounded-lg focus:border-[#D31145] focus:ring-2 focus:ring-[#D31145]/20 transition-all shadow-sm font-bold bg-white text-sm sm:text-base"
               />
             </div>
           </div>
+          {manualEditConfirmation && (
+            <div className="mt-3 p-3 bg-blue-50 border-2 border-blue-200 rounded-lg">
+              <p className="text-sm text-blue-800 font-medium flex items-center gap-2">
+                <span>ℹ️</span>
+                {manualEditConfirmation}
+              </p>
+            </div>
+          )}
         </div>
       </div>
+      
+      {/* Team Monthly Goal (Leaders only) */}
+      <div className="bg-gradient-to-br from-purple-50 to-white border border-purple-200 rounded-xl shadow-md p-4 sm:p-6">
+        <h3 className="text-lg sm:text-xl font-bold text-purple-700 mb-3 sm:mb-4">
+          Team Goal for {getCurrentMonthYear()}
+        </h3>
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4">
+          <div>
+            <label className="text-xs font-bold text-purple-700 mb-2 block">
+              Target Team FYC
+            </label>
+            <input
+              type="text"
+              value={formatNumberWithCommas(monthlyTeamGoalFYC)}
+              onChange={(e) => {
+                handleNumberInputChange(e.target.value, (val) => {
+                  const teamFYC = parseCommaNumber(val) || 0;
+                  setMonthlyTeamGoalFYC(val);
+                  // Calculate Team FYP using 25% rate (FYP = FYC / 0.25)
+                  const teamFYP = teamFYC / 0.25;
+                  setMonthlyTeamGoalFYP(formatNumberWithCommas(Math.round(teamFYP).toString()));
+                });
+              }}
+              className="w-full p-2.5 sm:p-3 border-2 border-purple-300 rounded-lg focus:border-purple-600 focus:ring-2 focus:ring-purple-600/20 transition-all shadow-sm font-bold bg-white text-sm sm:text-base"
+            />
+          </div>
+          <div>
+            <label className="text-xs font-bold text-purple-700 mb-2 block">
+              Target Team FYP
+            </label>
+            <input
+              type="text"
+              value={formatNumberWithCommas(monthlyTeamGoalFYP)}
+              onChange={(e) => {
+                handleNumberInputChange(e.target.value, (val) => {
+                  const teamFYP = parseCommaNumber(val) || 0;
+                  setMonthlyTeamGoalFYP(val);
+                  // Calculate Team FYC using 25% rate (FYC = FYP * 0.25)
+                  const teamFYC = teamFYP * 0.25;
+                  setMonthlyTeamGoalFYC(formatNumberWithCommas(Math.round(teamFYC).toString()));
+                });
+              }}
+              className="w-full p-2.5 sm:p-3 border-2 border-purple-300 rounded-lg focus:border-purple-600 focus:ring-2 focus:ring-purple-600/20 transition-all shadow-sm font-bold bg-white text-sm sm:text-base"
+            />
+          </div>
+        </div>
+      </div>
+      </div>
+      ) : (
+        // Advisor: Single monthly goal
+        <div className="bg-gradient-to-br from-red-50 to-white border border-red-100 rounded-xl shadow-md p-4 sm:p-6">
+          <h3 className="text-lg sm:text-xl font-bold text-[#D31145] mb-3 sm:mb-4">
+            Goal for {getCurrentMonthYear()}
+          </h3>
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 sm:gap-6">
+            <div className="space-y-3">
+              <select
+                value={monthlyGoalTarget}
+                onChange={(e) => setMonthlyGoalTarget(e.target.value)}
+                className="w-full p-3 border-2 border-slate-200 rounded-lg focus:border-[#D31145] focus:ring-2 focus:ring-[#D31145]/20 transition-all shadow-sm text-sm font-medium"
+              >
+                <option value="">Select Goal...</option>
+                <option value="MDRT_ON_TRACK">MDRT on Track</option>
+                <option value="PREMIER_ADVISOR">Premier Advisor by Year End</option>
+                <option value="MILLIONAIRE">Be A Millionaire</option>
+                <option value="OTHERS">Others</option>
+              </select>
+              <input
+                type="text"
+                value={formatNumberWithCommas(monthlyCurrentFYP)}
+                onChange={(e) => {
+                  handleNumberInputChange(e.target.value, setMonthlyCurrentFYP);
+                }}
+                placeholder="Current FYP (optional)"
+                className="w-full p-3 border-2 border-slate-200 rounded-lg focus:border-[#D31145] focus:ring-2 focus:ring-[#D31145]/20 transition-all shadow-sm text-sm"
+              />
+            </div>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4">
+              <div>
+                <label className="text-xs font-bold text-[#D31145] mb-2 block">
+                  Target FYC
+                  {monthlyGoalTarget === 'MDRT_ON_TRACK' && <span className="text-[10px] text-slate-600"> (25% of FYP)</span>}
+                  {monthlyGoalTarget === 'PREMIER_ADVISOR' && <span className="text-[10px] text-slate-600"> (25% of FYP)</span>}
+                </label>
+                <input
+                  type="text"
+                  value={formatNumberWithCommas(monthlyGoalFYC)}
+                  onChange={(e) => {
+                    handleNumberInputChange(e.target.value, (val) => {
+                      const oldFYC = parseCommaNumber(monthlyGoalFYC) || 0;
+                      const newFYC = parseCommaNumber(val) || 0;
+                      setMonthlyGoalFYC(val);
+                      
+                      // Show confirmation for manual edits on auto-populated goals
+                      if (monthlyGoalTarget !== 'OTHERS' && monthlyGoalTarget !== '' && oldFYC !== newFYC && oldFYC > 0) {
+                        setManualEditConfirmation(`FYC manually adjusted to ₱${formatNumberWithCommas(newFYC.toString())}. FYP recalculated accordingly.`);
+                        setTimeout(() => setManualEditConfirmation(null), 5000);
+                      }
+                      
+                      // Always calculate FYP from FYC using 25% rate (FYP = FYC / 0.25)
+                      const fyp = newFYC / 0.25;
+                      setMonthlyGoalFYP(formatNumberWithCommas(Math.round(fyp).toString()));
+                    });
+                  }}
+                  className="w-full p-2.5 sm:p-3 border-2 border-[#D31145]/30 rounded-lg focus:border-[#D31145] focus:ring-2 focus:ring-[#D31145]/20 transition-all shadow-sm font-bold bg-white text-sm sm:text-base"
+                />
+              </div>
+              <div>
+                <label className="text-xs font-bold text-[#D31145] mb-2 block">
+                  Target FYP
+                </label>
+                <input
+                  type="text"
+                  value={formatNumberWithCommas(monthlyGoalFYP)}
+                  onChange={(e) => {
+                    handleNumberInputChange(e.target.value, (val) => {
+                      const oldFYP = parseCommaNumber(monthlyGoalFYP) || 0;
+                      const newFYP = parseCommaNumber(val) || 0;
+                      setMonthlyGoalFYP(val);
+                      
+                      // Show confirmation for manual edits on auto-populated goals
+                      if (monthlyGoalTarget !== 'OTHERS' && monthlyGoalTarget !== '' && oldFYP !== newFYP && oldFYP > 0) {
+                        setManualEditConfirmation(`FYP manually adjusted to ₱${formatNumberWithCommas(newFYP.toString())}. FYC recalculated accordingly.`);
+                        setTimeout(() => setManualEditConfirmation(null), 5000);
+                      }
+                      
+                      // Always calculate FYC from FYP using 25% rate (FYC = FYP * 0.25)
+                      const fyc = newFYP * 0.25;
+                      setMonthlyGoalFYC(formatNumberWithCommas(Math.round(fyc).toString()));
+                    });
+                  }}
+                  className="w-full p-2.5 sm:p-3 border-2 border-[#D31145]/30 rounded-lg focus:border-[#D31145] focus:ring-2 focus:ring-[#D31145]/20 transition-all shadow-sm font-bold bg-white text-sm sm:text-base"
+                />
+              </div>
+            </div>
+            {manualEditConfirmation && (
+              <div className="mt-3 p-3 bg-blue-50 border-2 border-blue-200 rounded-lg">
+                <p className="text-sm text-blue-800 font-medium flex items-center gap-2">
+                  <span>ℹ️</span>
+                  {manualEditConfirmation}
+                </p>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
 
-      {/* 2026 Targets */}
+      {/* Quarterly Goals */}
       <div className="bg-white rounded-xl shadow-sm p-4 sm:p-6">
         <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-3 sm:gap-4 mb-4">
-          <h3 className="text-base sm:text-lg font-bold text-slate-800">2026 Quarterly Goals</h3>
+          <h3 className="text-base sm:text-lg font-bold text-slate-800">Quarterly Goals</h3>
           <div className="flex items-center gap-2 bg-slate-50 px-3 py-2 rounded-lg border-2 border-slate-200 self-start sm:self-auto">
             <label className="text-xs font-semibold text-slate-700">Comm %</label>
             <input
@@ -749,6 +1125,16 @@ export function GoalSettingTab({ userState, onShowAI }: GoalSettingTabProps) {
                 <p className="text-base sm:text-lg font-bold text-purple-900 mt-1 break-all">
                   ₱{totalFYP.toLocaleString()}
                 </p>
+                {(monthlyGoalTarget === 'MDRT_ON_TRACK' || monthlyGoalTarget === 'PREMIER_ADVISOR' || monthlyGoalTarget === 'MILLIONAIRE') && totalFYC > 0 && (
+                  <div className="mt-1 text-[10px] sm:text-xs text-purple-700 font-medium">
+                    Calculated at 25% rate (FYP = FYC ÷ 0.25)
+                  </div>
+                )}
+                {monthlyGoalTarget === 'OTHERS' && totalFYC > 0 && (
+                  <div className="mt-1 text-[10px] sm:text-xs text-purple-700 font-medium">
+                    Calculated at {commRate}% rate (FYP = FYC ÷ {commRate / 100})
+                  </div>
+                )}
               </div>
             </div>
             {/* Annual Bonus Qualification Prompt for Advisors */}
@@ -881,7 +1267,19 @@ export function GoalSettingTab({ userState, onShowAI }: GoalSettingTabProps) {
                       <input
                         type="text"
                         value={formatNumberWithCommas(value)}
-                        onChange={(e) => handleNumberInputChange(e.target.value, setValue)}
+                        onChange={(e) => {
+                          const oldValue = parseCommaNumber(value) || 0;
+                          handleNumberInputChange(e.target.value, (val) => {
+                            setValue(val);
+                            // Show confirmation if this was auto-populated and user is manually editing
+                            if (quarterlyGoalsAutoPopulated && monthlyGoalTarget === 'MDRT_ON_TRACK' && oldValue > 0 && oldValue !== parseCommaNumber(val)) {
+                              const newValue = parseCommaNumber(val) || 0;
+                              setManualEditConfirmation(`Q${q} FYC manually adjusted to ₱${formatNumberWithCommas(newValue.toString())}.`);
+                              setTimeout(() => setManualEditConfirmation(null), 5000);
+                              setQuarterlyGoalsAutoPopulated(false); // Mark as no longer auto-populated after manual edit
+                            }
+                          });
+                        }}
                         className="w-full p-3 border-2 border-slate-200 rounded-lg focus:border-[#D31145] focus:ring-2 focus:ring-[#D31145]/20 transition-all shadow-sm text-sm font-medium"
                         placeholder="Enter FYC"
                       />
@@ -1052,7 +1450,19 @@ export function GoalSettingTab({ userState, onShowAI }: GoalSettingTabProps) {
                       <input
                         type="text"
                         value={formatNumberWithCommas(value)}
-                        onChange={(e) => handleNumberInputChange(e.target.value, setValue)}
+                        onChange={(e) => {
+                          const oldValue = parseCommaNumber(value) || 0;
+                          handleNumberInputChange(e.target.value, (val) => {
+                            setValue(val);
+                            // Show confirmation if this was auto-populated and user is manually editing
+                            if (quarterlyGoalsAutoPopulated && monthlyGoalTarget === 'MDRT_ON_TRACK' && oldValue > 0 && oldValue !== parseCommaNumber(val)) {
+                              const newValue = parseCommaNumber(val) || 0;
+                              setManualEditConfirmation(`Q${q} Personal FYC manually adjusted to ₱${formatNumberWithCommas(newValue.toString())}.`);
+                              setTimeout(() => setManualEditConfirmation(null), 5000);
+                              setQuarterlyGoalsAutoPopulated(false); // Mark as no longer auto-populated after manual edit
+                            }
+                          });
+                        }}
                         className="w-full p-2 border-2 border-slate-200 rounded-lg focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/20 transition-all shadow-sm text-xs sm:text-sm font-medium"
                         placeholder="Personal FYC"
                       />
@@ -1496,7 +1906,7 @@ export function GoalSettingTab({ userState, onShowAI }: GoalSettingTabProps) {
         <div className="bg-gradient-to-br from-white via-red-50/30 to-pink-50/20 border-2 border-[#D31145]/20 p-4 sm:p-6 rounded-xl shadow-xl">
           <h3 className="text-lg sm:text-xl font-bold text-slate-800 border-b-2 border-[#D31145]/30 pb-2 sm:pb-3 mb-4 sm:mb-5 flex items-center gap-2">
             <span className="text-xl sm:text-2xl">📊</span>
-            2026 Annual Summary
+            Annual Summary
           </h3>
           {!isLeader ? (
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-3 sm:gap-4 text-center">
@@ -1561,9 +1971,17 @@ export function GoalSettingTab({ userState, onShowAI }: GoalSettingTabProps) {
                 </div>
               )}
             </div>
+            {shouldPreventSubmission && (
+              <div className="mb-4 p-4 bg-amber-50 border-2 border-amber-300 rounded-lg">
+                <p className="text-sm font-bold text-amber-800 flex items-center gap-2">
+                  <span className="text-lg">⚠️</span>
+                  <span>Leaders cannot submit goals as advisors. Please switch to Leader view using the toggle above to submit your goals.</span>
+                </p>
+              </div>
+            )}
             <button
               onClick={handleSubmitGoals}
-              disabled={isSubmitting}
+              disabled={isSubmitting || shouldPreventSubmission}
               className="px-6 sm:px-8 py-3 sm:py-4 bg-gradient-to-r from-[#D31145] to-[#B0103A] text-white font-bold rounded-lg shadow-lg hover:shadow-xl hover:scale-105 transition-all disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:scale-100 flex items-center gap-2"
             >
               {isSubmitting ? (

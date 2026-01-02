@@ -9,7 +9,15 @@ import {
   getPersistencyMultiplier,
 } from '../utils/bonus-calculations';
 
-export function AdvisorSimTab() {
+interface AdvisorSimTabProps {
+  onPushToGoals?: (data: {
+    fyc: number;
+    cases: number;
+    persistency: number;
+  }) => void;
+}
+
+export function AdvisorSimTab({ onPushToGoals }: AdvisorSimTabProps = {}) {
   // Load from localStorage or use defaults
   const [fyc, setFYC] = useState(() => {
     if (typeof window !== 'undefined') {
@@ -192,6 +200,20 @@ export function AdvisorSimTab() {
           </div>
         </div>
         <div className="lg:col-span-8 bg-white rounded-xl p-6 shadow-sm">
+          {onPushToGoals && (
+            <button
+              onClick={() => {
+                onPushToGoals({
+                  fyc: fyc, // fyc is already quarterly
+                  cases: cases,
+                  persistency: persistency,
+                });
+              }}
+              className="w-full mb-4 bg-gradient-to-r from-green-600 to-emerald-600 text-white font-bold py-3.5 rounded-xl hover:shadow-lg hover:scale-[1.02] transition-all shadow-md flex items-center justify-center gap-2 text-sm"
+            >
+              <span className="text-lg">📊</span> Push to Goal Setting
+            </button>
+          )}
           <div className="bg-gradient-to-br from-slate-50 to-red-50/30 rounded-xl p-5 mb-4 border-2 border-slate-200">
             <div className="flex justify-between items-end">
               <div>

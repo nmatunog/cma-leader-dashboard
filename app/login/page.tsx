@@ -10,6 +10,8 @@ export default function LoginPage() {
   const router = useRouter();
   const { user, loading } = useAuth();
   const [email, setEmail] = useState('');
+  const [code, setCode] = useState('');
+  const [useCode, setUseCode] = useState(false); // Default to email-based login (better for admin)
   const [password, setPassword] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState('');
@@ -34,7 +36,27 @@ export default function LoginPage() {
     setIsLoading(true);
 
     try {
-      const result = await loginUser(email.trim(), password);
+      let loginEmail = '';
+      
+      if (useCode) {
+        // Convert code to email format
+        if (!code.trim()) {
+          setError('Please enter your code');
+          setIsLoading(false);
+          return;
+        }
+        loginEmail = `${code.trim().toLowerCase().replace(/[^a-z0-9]/g, '')}@cma.local`;
+      } else {
+        // Use email directly
+        if (!email.trim()) {
+          setError('Please enter your email');
+          setIsLoading(false);
+          return;
+        }
+        loginEmail = email.trim();
+      }
+
+      const result = await loginUser(loginEmail, password);
       
       if (result.success && result.user) {
         // Redirect based on role
@@ -59,12 +81,19 @@ export default function LoginPage() {
     setError('');
     
     if (!resetEmail.trim()) {
-      setError('Please enter your email address');
+      setError('Please enter your email address or code');
       return;
     }
 
     try {
-      const result = await resetPassword(resetEmail.trim());
+      // Check if it looks like a code (no @ symbol) or email
+      let emailToUse = resetEmail.trim();
+      if (!emailToUse.includes('@')) {
+        // It's a code, convert to email format
+        emailToUse = `${emailToUse.toLowerCase().replace(/[^a-z0-9]/g, '')}@cma.local`;
+      }
+
+      const result = await resetPassword(emailToUse);
       if (result.success) {
         setResetSent(true);
         setError('');
@@ -138,17 +167,20 @@ export default function LoginPage() {
             <form onSubmit={handleForgotPassword} className="space-y-5">
               <div>
                 <label className="block text-xs font-bold text-slate-600 uppercase mb-2 tracking-wide">
-                  Email Address
+                  Code or Email Address
                 </label>
                 <input
-                  type="email"
+                  type="text"
                   value={resetEmail}
                   onChange={(e) => setResetEmail(e.target.value)}
                   className="w-full p-3.5 border-2 border-slate-200 rounded-xl outline-none focus:border-[#D31145] focus:ring-2 focus:ring-[#D31145]/20 transition-all shadow-sm text-base"
-                  placeholder="Enter your email"
+                  placeholder="Enter your code or email"
                   required
                   disabled={isLoading}
                 />
+                <p className="text-xs text-slate-500 mt-1">
+                  Enter your advisor/leader code or email address
+                </p>
               </div>
               <button
                 type="submit"
@@ -168,21 +200,74 @@ export default function LoginPage() {
             </form>
           ) : (
             <form onSubmit={handleLogin} className="space-y-5">
-              <div>
-                <label className="block text-xs font-bold text-slate-600 uppercase mb-2 tracking-wide">
-                  Email Address
-                </label>
-                <input
-                  type="email"
-                  value={email}
-                  onChange={(e) => setEmail(e.target.value)}
-                  className="w-full p-3.5 border-2 border-slate-200 rounded-xl outline-none focus:border-[#D31145] focus:ring-2 focus:ring-[#D31145]/20 transition-all shadow-sm text-base"
-                  placeholder="Enter your email"
-                  required
+              <div className="flex items-center justify-center gap-4 mb-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setUseCode(true);
+                    setEmail('');
+                    setError('');
+                  }}
+                  className={`px-4 py-2 rounded-lg text-sm font-semibold transition-all ${
+                    useCode
+                      ? 'bg-[#D31145] text-white shadow-md'
+                      : 'bg-slate-200 text-slate-600 hover:bg-slate-300'
+                  }`}
                   disabled={isLoading}
-                  autoComplete="email"
-                />
+                >
+                  Code
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setUseCode(false);
+                    setCode('');
+                    setError('');
+                  }}
+                  className={`px-4 py-2 rounded-lg text-sm font-semibold transition-all ${
+                    !useCode
+                      ? 'bg-[#D31145] text-white shadow-md'
+                      : 'bg-slate-200 text-slate-600 hover:bg-slate-300'
+                  }`}
+                  disabled={isLoading}
+                >
+                  Email
+                </button>
               </div>
+
+              {useCode ? (
+                <div>
+                  <label className="block text-xs font-bold text-slate-600 uppercase mb-2 tracking-wide">
+                    Advisor/Leader Code
+                  </label>
+                  <input
+                    type="text"
+                    value={code}
+                    onChange={(e) => setCode(e.target.value.toUpperCase())}
+                    className="w-full p-3.5 border-2 border-slate-200 rounded-xl outline-none focus:border-[#D31145] focus:ring-2 focus:ring-[#D31145]/20 transition-all shadow-sm text-base"
+                    placeholder="Enter your code"
+                    required
+                    disabled={isLoading}
+                    autoComplete="username"
+                  />
+                </div>
+              ) : (
+                <div>
+                  <label className="block text-xs font-bold text-slate-600 uppercase mb-2 tracking-wide">
+                    Email Address
+                  </label>
+                  <input
+                    type="email"
+                    value={email}
+                    onChange={(e) => setEmail(e.target.value)}
+                    className="w-full p-3.5 border-2 border-slate-200 rounded-xl outline-none focus:border-[#D31145] focus:ring-2 focus:ring-[#D31145]/20 transition-all shadow-sm text-base"
+                    placeholder="Enter your email"
+                    required
+                    disabled={isLoading}
+                    autoComplete="email"
+                  />
+                </div>
+              )}
               <div>
                 <label className="block text-xs font-bold text-slate-600 uppercase mb-2 tracking-wide">
                   Password
@@ -223,6 +308,12 @@ export default function LoginPage() {
                   'Login'
                 )}
               </button>
+              <p className="text-center text-sm text-slate-600 mt-4">
+                Don't have an account?{' '}
+                <a href="/signup" className="text-[#D31145] font-semibold hover:underline">
+                  Sign up
+                </a>
+              </p>
             </form>
           )}
         </div>

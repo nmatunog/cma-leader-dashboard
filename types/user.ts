@@ -5,11 +5,12 @@
 import { Timestamp } from 'firebase/firestore';
 
 export type UserRole = 'admin' | 'leader' | 'advisor';
-export type UserRank = 'LA' | 'UM' | 'SUM' | 'AD' | 'ADMIN';
+export type UserRank = 'ADMIN' | 'ADD' | 'SUM' | 'UM' | 'AUM' | 'ADV';
 
 export interface User {
   uid: string;                    // Firebase Auth UID (document ID)
-  email: string;
+  email: string;                  // Email (may be generated from code like {code}@cma.local)
+  code?: string;                  // Advisor/Leader code (primary identifier)
   name: string;
   role: UserRole;
   rank: UserRank;
@@ -24,7 +25,8 @@ export interface User {
 }
 
 export interface UserCreateData {
-  email: string;
+  email: string;                  // Email (may be generated from code)
+  code?: string;                  // Advisor/Leader code (optional, used for code-based signup)
   password: string;
   name: string;
   role: UserRole;

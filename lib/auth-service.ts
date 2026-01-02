@@ -36,6 +36,7 @@ export async function registerUser(userData: UserCreateData, createdBy: string):
     // Create user document in Firestore
     const userDoc: Omit<User, 'uid'> = {
       email: userData.email,
+      code: userData.code,
       name: userData.name,
       role: userData.role,
       rank: userData.rank,

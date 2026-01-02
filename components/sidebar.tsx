@@ -2,9 +2,10 @@
 
 import { useState, useEffect } from 'react';
 import Link from 'next/link';
-import { usePathname } from 'next/navigation';
+import { usePathname, useRouter } from 'next/navigation';
 import { cn } from '@/lib/utils';
 import { useAuth } from '@/contexts/auth-context';
+import { signOutUser } from '@/lib/auth-service';
 
 interface NavItem {
   name: string;
@@ -24,12 +25,29 @@ const baseNavItems: NavItem[] = [
 
 const adminNavItems: NavItem[] = [
   { name: 'User Management', href: '/admin/users', icon: 'users-cog' },
+  { name: 'Import Data', href: '/admin/import', icon: 'file-import' },
 ];
 
 export function Sidebar() {
   const pathname = usePathname();
+  const router = useRouter();
   const { user } = useAuth();
   const [agencyName, setAgencyName] = useState<string>('Cebu Matunog Agency');
+  const [isLoggingOut, setIsLoggingOut] = useState(false);
+
+  const handleLogout = async () => {
+    setIsLoggingOut(true);
+    try {
+      await signOutUser();
+      router.push('/login');
+    } catch (error) {
+      console.error('Error signing out:', error);
+      // Still redirect to login even if sign out fails
+      router.push('/login');
+    } finally {
+      setIsLoggingOut(false);
+    }
+  };
 
   useEffect(() => {
     // Load agency name from localStorage (set when sheets are synced)
@@ -103,9 +121,9 @@ export function Sidebar() {
       </ul>
 
       <div className="mt-10 border-t border-slate-700/50 pt-6">
-        <div className="flex items-center space-x-3">
+        <div className="flex items-center space-x-3 mb-4">
           <div className="h-10 w-10 rounded-full bg-gradient-to-br from-slate-600 to-slate-700"></div>
-          <div>
+          <div className="flex-1">
             <p className="font-semibold text-white">{user?.name || 'User'}</p>
             <p className="text-sm text-gray-400">{user?.agencyName || agencyName}</p>
             {user?.role && (
@@ -113,6 +131,14 @@ export function Sidebar() {
             )}
           </div>
         </div>
+        <button
+          onClick={handleLogout}
+          disabled={isLoggingOut}
+          className="w-full flex items-center justify-center space-x-2 rounded-lg bg-red-600/90 hover:bg-red-700 px-4 py-2.5 text-white font-medium transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed"
+        >
+          <i className="fa-solid fa-sign-out-alt"></i>
+          <span>{isLoggingOut ? 'Logging out...' : 'Logout'}</span>
+        </button>
       </div>
     </nav>
   );

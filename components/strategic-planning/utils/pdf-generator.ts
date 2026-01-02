@@ -79,13 +79,13 @@ export function generateStrategicPlanningPDF(data: PDFReportData): void {
   doc.setTextColor(0, 0, 0);
   doc.setFont('helvetica', 'normal');
   
-  const decRows = [
-    ['FYP', `₱${goal.dec2025FYP.toLocaleString()}`],
-    ['FYC', `₱${goal.dec2025FYC.toLocaleString()}`],
-    ['Cases', goal.dec2025Cases.toString()],
+  const monthlyGoalRows = [
+    ['FYP', `₱${goal.monthlyTargetFYP.toLocaleString()}`],
+    ['FYC', `₱${goal.monthlyTargetFYC.toLocaleString()}`],
+    ['Cases', goal.monthlyTargetCases.toString()],
   ];
   
-  decRows.forEach((row) => {
+  monthlyGoalRows.forEach((row) => {
     doc.rect(xPos, yPos - 5, decColWidths[0], 7);
     doc.rect(xPos + decColWidths[0], yPos - 5, decColWidths[1], 7);
     doc.text(row[0], xPos + 2, yPos);
@@ -95,11 +95,11 @@ export function generateStrategicPlanningPDF(data: PDFReportData): void {
   
   yPos += 5;
   
-  // 2026 Quarterly Goals Section
+  // Quarterly Goals Section
   checkPageBreak(80);
   doc.setFontSize(14);
   doc.setFont('helvetica', 'bold');
-  doc.text('2026 Quarterly Goals Summary', margin, yPos);
+  doc.text('Quarterly Goals Summary', margin, yPos);
   yPos += 8;
   
   doc.setFontSize(10);

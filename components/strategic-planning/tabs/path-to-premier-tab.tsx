@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useMemo } from 'react';
 import { Chart, ChartConfiguration } from 'chart.js/auto';
 import { UserState } from '../strategic-planning-app';
 import { formatNumberWithCommas, parseCommaNumber, handleNumberInputChange } from '../utils/number-format';
@@ -19,7 +19,7 @@ interface SegmentationTier {
   bgColor: string;
 }
 
-// Get tier requirements based on leader rank (UM, SUM, AD)
+// Get tier requirements based on leader rank (ADD, SUM, UM, AUM)
 function getTierRequirements(rank: string): SegmentationTier[] {
   const normalizedRank = rank.toUpperCase();
   
@@ -158,8 +158,8 @@ export function PathToPremierTab({ userState }: PathToPremierTabProps) {
     );
   }
 
-  // Get tier requirements based on user's rank
-  const TIERS = getTierRequirements(userState.rank);
+  // Get tier requirements based on user's rank (memoized to prevent infinite loops)
+  const TIERS = useMemo(() => getTierRequirements(userState.rank), [userState.rank]);
   const anpLabel = userState.rank.toUpperCase() === 'UM' ? 'Direct Team ANP' : 'Team ANP';
 
   const [currentANP, setCurrentANP] = useState(0);
@@ -198,8 +198,17 @@ export function PathToPremierTab({ userState }: PathToPremierTabProps) {
     const currentTierValue = TIERS[tierIndex];
     const nextTierValue = tierIndex < TIERS.length - 1 ? TIERS[tierIndex + 1] : null;
     
-    setCurrentTier(currentTierValue);
-    setNextTier(nextTierValue);
+    // Only update state if values have changed (prevents infinite loops)
+    setCurrentTier(prev => {
+      if (prev.name === currentTierValue.name && prev.anp === currentTierValue.anp) return prev;
+      return currentTierValue;
+    });
+    setNextTier(prev => {
+      if (!nextTierValue && !prev) return null;
+      if (!nextTierValue || !prev) return nextTierValue;
+      if (prev.name === nextTierValue.name && prev.anp === nextTierValue.anp) return prev;
+      return nextTierValue;
+    });
 
     // Calculate gaps to next tier (use nextTierValue directly, not state)
     if (nextTierValue) {

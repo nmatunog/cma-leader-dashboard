@@ -45,7 +45,3 @@ next-env.d.ts
 
 # OS
 Thumbs.db
-
-# Auto-commit logs
-.auto-commit.log
-.last-auto-commit
