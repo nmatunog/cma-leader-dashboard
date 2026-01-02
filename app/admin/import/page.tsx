@@ -7,7 +7,7 @@ import { useAuth } from '@/contexts/auth-context';
 import { convertWorksheetNameToDisplay, parseWorksheetName } from '@/lib/utils/name-formatter';
 import { getAgencies } from '@/services/agency-service';
 import { batchSaveHierarchyEntries, clearHierarchyForAgency, initializeHardcodedHierarchy } from '@/services/organizational-hierarchy-service';
-import { deleteAllGoals } from '@/services/strategic-planning-service';
+import { deleteAllGoals, deleteUserGoalsByEmail } from '@/services/strategic-planning-service';
 import type { UserRank } from '@/types/user';
 
 interface WorksheetRow {
@@ -41,6 +41,9 @@ export default function ImportPage() {
   } | null>(null);
   const [showClearGoalsConfirm, setShowClearGoalsConfirm] = useState(false);
   const [clearGoalsResult, setClearGoalsResult] = useState<{ success: boolean; deleted: number; error?: string } | null>(null);
+  const [userEmailToDelete, setUserEmailToDelete] = useState<string>('');
+  const [showDeleteUserGoalsConfirm, setShowDeleteUserGoalsConfirm] = useState(false);
+  const [deleteUserGoalsResult, setDeleteUserGoalsResult] = useState<{ success: boolean; deleted: number; error?: string } | null>(null);
 
   // Check if user is admin - redirect if not
   useEffect(() => {
@@ -384,6 +387,104 @@ export default function ImportPage() {
             >
               {loading ? 'Initializing...' : 'Initialize from Hardcoded Data'}
             </button>
+          </div>
+
+          {/* Delete Goals for Specific User */}
+          <div className="bg-white rounded-lg shadow-md p-6 mb-6 border-2 border-orange-200">
+            <h2 className="text-xl font-semibold text-orange-800 mb-4">🗑️ Delete Goals for Specific User</h2>
+            <p className="text-sm text-slate-600 mb-4">
+              Delete all strategic planning goal submissions for a specific user by email address.
+            </p>
+            <div className="mb-4">
+              <label htmlFor="userEmail" className="block text-sm font-medium text-slate-700 mb-2">
+                User Email Address
+              </label>
+              <input
+                id="userEmail"
+                type="email"
+                value={userEmailToDelete}
+                onChange={(e) => setUserEmailToDelete(e.target.value)}
+                placeholder="e.g., nmatunog@gmail.com"
+                className="w-full p-2 border-2 border-slate-200 rounded-lg focus:border-orange-500 focus:ring-2 focus:ring-orange-500/20"
+                disabled={loading}
+              />
+            </div>
+            {!showDeleteUserGoalsConfirm ? (
+              <button
+                onClick={() => {
+                  if (!userEmailToDelete.trim()) {
+                    setError('Please enter an email address');
+                    return;
+                  }
+                  setShowDeleteUserGoalsConfirm(true);
+                }}
+                className="w-full bg-orange-600 text-white font-bold py-3 rounded-lg hover:bg-orange-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                disabled={loading || !userEmailToDelete.trim()}
+              >
+                Delete Goals for This User
+              </button>
+            ) : (
+              <div className="space-y-3">
+                <div className="p-4 bg-yellow-50 border-2 border-yellow-300 rounded-lg">
+                  <p className="font-semibold text-yellow-800 mb-2">Are you sure?</p>
+                  <p className="text-sm text-yellow-700">
+                    This will delete all strategic planning goals for: <strong>{userEmailToDelete}</strong>
+                  </p>
+                  <p className="text-xs text-yellow-600 mt-2">This action cannot be undone.</p>
+                </div>
+                <div className="flex gap-3">
+                  <button
+                    onClick={async () => {
+                      setLoading(true);
+                      setDeleteUserGoalsResult(null);
+                      setError(null);
+                      try {
+                        const result = await deleteUserGoalsByEmail(userEmailToDelete);
+                        setDeleteUserGoalsResult(result);
+                        if (result.success) {
+                          setSuccess(`Successfully deleted ${result.deleted} goal(s) for ${userEmailToDelete}.`);
+                          setUserEmailToDelete('');
+                        } else {
+                          setError(result.error || 'Failed to delete user goals');
+                        }
+                        setShowDeleteUserGoalsConfirm(false);
+                      } catch (err) {
+                        setError(err instanceof Error ? err.message : 'Failed to delete user goals');
+                        setShowDeleteUserGoalsConfirm(false);
+                      } finally {
+                        setLoading(false);
+                      }
+                    }}
+                    className="flex-1 bg-orange-600 text-white font-bold py-3 rounded-lg hover:bg-orange-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                    disabled={loading}
+                  >
+                    {loading ? 'Deleting...' : 'Yes, Delete Goals'}
+                  </button>
+                  <button
+                    onClick={() => {
+                      setShowDeleteUserGoalsConfirm(false);
+                      setDeleteUserGoalsResult(null);
+                    }}
+                    className="flex-1 bg-slate-300 text-slate-700 font-bold py-3 rounded-lg hover:bg-slate-400 transition-colors"
+                    disabled={loading}
+                  >
+                    Cancel
+                  </button>
+                </div>
+              </div>
+            )}
+            {deleteUserGoalsResult && deleteUserGoalsResult.success && (
+              <div className="mt-4 p-4 bg-green-100 border border-green-300 text-green-800 rounded-lg">
+                <p className="font-semibold">Success!</p>
+                <p>Deleted {deleteUserGoalsResult.deleted} goal submission(s) for {userEmailToDelete}.</p>
+              </div>
+            )}
+            {deleteUserGoalsResult && !deleteUserGoalsResult.success && (
+              <div className="mt-4 p-4 bg-red-100 border border-red-300 text-red-800 rounded-lg">
+                <p className="font-semibold">Error:</p>
+                <p>{deleteUserGoalsResult.error}</p>
+              </div>
+            )}
           </div>
 
           {/* Clear All Strategic Planning Goals */}

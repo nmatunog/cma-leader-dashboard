@@ -277,6 +277,69 @@ export async function getAllGoals(): Promise<StrategicPlanningGoal[]> {
   }
 }
 
+// Delete all strategic planning goals for a specific user by email (Admin only)
+export async function deleteUserGoalsByEmail(email: string): Promise<{ success: boolean; deleted: number; error?: string }> {
+  try {
+    if (!db) {
+      return { success: false, deleted: 0, error: 'Firestore is not initialized' };
+    }
+
+    // First, find the user by email to get their UID
+    const usersQuery = query(
+      collection(db, 'users'),
+      where('email', '==', email.toLowerCase().trim())
+    );
+    
+    const usersSnapshot = await getDocs(usersQuery);
+    
+    if (usersSnapshot.empty) {
+      return { success: false, deleted: 0, error: `No user found with email: ${email}` };
+    }
+
+    // Get the user's UID (should only be one user with this email)
+    const userDoc = usersSnapshot.docs[0];
+    const userId = userDoc.id;
+
+    // Now find all goals for this user
+    const goalsQuery = query(
+      collection(db, GOALS_COLLECTION),
+      where('userId', '==', userId)
+    );
+    
+    const goalsSnapshot = await getDocs(goalsQuery);
+    
+    if (goalsSnapshot.empty) {
+      return { success: true, deleted: 0 };
+    }
+
+    // Delete in batches (Firestore batch limit is 500)
+    const batchSize = 500;
+    let deleted = 0;
+    const docs = goalsSnapshot.docs;
+
+    for (let i = 0; i < docs.length; i += batchSize) {
+      const batch = writeBatch(db);
+      const batchDocs = docs.slice(i, i + batchSize);
+      
+      batchDocs.forEach((docSnap) => {
+        batch.delete(docSnap.ref);
+      });
+      
+      await batch.commit();
+      deleted += batchDocs.length;
+    }
+
+    return { success: true, deleted };
+  } catch (error) {
+    console.error('Error deleting user goals:', error);
+    return {
+      success: false,
+      deleted: 0,
+      error: error instanceof Error ? error.message : 'Failed to delete user goals',
+    };
+  }
+}
+
 // Delete all strategic planning goals (Admin only - use with caution!)
 export async function deleteAllGoals(): Promise<{ success: boolean; deleted: number; error?: string }> {
   try {
