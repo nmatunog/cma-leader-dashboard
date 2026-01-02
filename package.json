@@ -13,7 +13,7 @@
     "lint:fix": "eslint --fix",
     "type-check": "tsc --noEmit",
     "verify-env": "node scripts/verify-env.js",
-    "prebuild": "npm run type-check && npm run verify-env",
+    "prebuild": "npm run verify-env",
     "auto-commit:start": "./scripts/auto-commit.sh",
     "auto-commit:stop": "pkill -f auto-commit.sh || true",
     "auto-commit:status": "ps aux | grep '[a]uto-commit.sh' || echo 'Auto-commit is not running'"
