@@ -15,6 +15,9 @@ import {
 } from '@/lib/user-service';
 import type { User, UserCreateData, UserUpdateData, UserRole, UserRank } from '@/types/user';
 import { getAgencies, addAgency, removeAgency, type Agency } from '@/services/agency-service';
+import { TempPasswordModal } from '@/components/admin/temp-password-modal';
+import { ViewTempPasswordModal } from '@/components/admin/view-temp-password-modal';
+import { EmergencyResetModal } from '@/components/admin/emergency-reset-modal';
 
 export default function AdminUsersPage() {
   const router = useRouter();
@@ -35,6 +38,15 @@ export default function AdminUsersPage() {
   const [agencyError, setAgencyError] = useState<string | null>(null);
   const [promotingUser, setPromotingUser] = useState<User | null>(null);
   const [showPromoteModal, setShowPromoteModal] = useState(false);
+  const [showTempPasswordModal, setShowTempPasswordModal] = useState(false);
+  const [tempPasswordUserId, setTempPasswordUserId] = useState<string>('');
+  const [tempPasswordUserName, setTempPasswordUserName] = useState<string>('');
+  const [showViewTempPasswordModal, setShowViewTempPasswordModal] = useState(false);
+  const [viewTempPasswordUserId, setViewTempPasswordUserId] = useState<string>('');
+  const [viewTempPasswordUserName, setViewTempPasswordUserName] = useState<string>('');
+  const [showEmergencyResetModal, setShowEmergencyResetModal] = useState(false);
+  const [emergencyResetUserId, setEmergencyResetUserId] = useState<string>('');
+  const [emergencyResetUserName, setEmergencyResetUserName] = useState<string>('');
 
   // Check if user is admin
   useEffect(() => {
@@ -155,27 +167,40 @@ export default function AdminUsersPage() {
     }
   };
 
-  const handleSetTempPassword = async (uid: string, setTemp: boolean) => {
-    const action = setTemp ? 'set' : 'clear';
-    const confirmMessage = setTemp 
-      ? 'Set temporary password flag? The user will be required to change their password on next login. Note: You must communicate the temporary password to the user separately (Firebase Admin SDK is required to set passwords directly).'
-      : 'Clear temporary password flag?';
-    
-    if (!confirm(confirmMessage)) return;
+  const handleSetTempPassword = async (uid: string) => {
+    // Find the user to show in modal
+    const user = users.find(u => u.uid === uid);
+    if (!user) return;
+
+    setTempPasswordUserId(uid);
+    setTempPasswordUserName(user.name);
+    setShowTempPasswordModal(true);
+  };
+
+  const handleEmergencyReset = async (uid: string) => {
+    // Find the user to show in modal
+    const user = users.find(u => u.uid === uid);
+    if (!user) return;
+
+    setEmergencyResetUserId(uid);
+    setEmergencyResetUserName(user.name);
+    setShowEmergencyResetModal(true);
+  };
+
+  const handleClearTempPassword = async (uid: string) => {
+    if (!confirm('Clear temporary password flag? This will not change the user\'s password.')) return;
 
     try {
       setActionLoading(`temp-password-${uid}`);
-      const result = await updateUser(uid, { isTempPassword: setTemp });
+      const result = await updateUser(uid, { isTempPassword: false });
       if (result.success) {
         await loadUsers();
-        alert(setTemp 
-          ? 'Temporary password flag set. User must change password on next login. Remember to communicate the temporary password to the user.'
-          : 'Temporary password flag cleared.');
+        alert('Temporary password flag cleared.');
       } else {
-        alert(result.error || `Failed to ${action} temporary password flag`);
+        alert(result.error || 'Failed to clear temporary password flag');
       }
     } catch (err) {
-      alert(err instanceof Error ? err.message : `Failed to ${action} temporary password flag`);
+      alert(err instanceof Error ? err.message : 'Failed to clear temporary password flag');
     } finally {
       setActionLoading(null);
     }
@@ -496,23 +521,47 @@ export default function AdminUsersPage() {
                               </button>
                             )}
                             {user.isTempPassword ? (
-                              <button
-                                onClick={() => handleSetTempPassword(user.uid, false)}
-                                disabled={actionLoading !== null}
-                                className="px-3 py-1 bg-amber-600 text-white rounded hover:bg-amber-700 text-xs font-semibold disabled:opacity-50 disabled:cursor-not-allowed"
-                                title="Clear temporary password flag"
-                              >
-                                {actionLoading === `temp-password-${user.uid}` ? '...' : 'Clear Temp'}
-                              </button>
+                              <>
+                                <button
+                                  onClick={() => {
+                                    setViewTempPasswordUserId(user.uid);
+                                    setViewTempPasswordUserName(user.name);
+                                    setShowViewTempPasswordModal(true);
+                                  }}
+                                  disabled={actionLoading !== null}
+                                  className="px-3 py-1 bg-blue-600 text-white rounded hover:bg-blue-700 text-xs font-semibold disabled:opacity-50 disabled:cursor-not-allowed"
+                                  title="View temporary password"
+                                >
+                                  View Temp
+                                </button>
+                                <button
+                                  onClick={() => handleClearTempPassword(user.uid)}
+                                  disabled={actionLoading !== null}
+                                  className="px-3 py-1 bg-amber-600 text-white rounded hover:bg-amber-700 text-xs font-semibold disabled:opacity-50 disabled:cursor-not-allowed"
+                                  title="Clear temporary password flag"
+                                >
+                                  {actionLoading === `temp-password-${user.uid}` ? '...' : 'Clear Temp'}
+                                </button>
+                              </>
                             ) : (
-                              <button
-                                onClick={() => handleSetTempPassword(user.uid, true)}
-                                disabled={actionLoading !== null}
-                                className="px-3 py-1 bg-yellow-600 text-white rounded hover:bg-yellow-700 text-xs font-semibold disabled:opacity-50 disabled:cursor-not-allowed"
-                                title="Set temporary password flag"
-                              >
-                                {actionLoading === `temp-password-${user.uid}` ? '...' : 'Set Temp'}
-                              </button>
+                              <>
+                                <button
+                                  onClick={() => handleSetTempPassword(user.uid)}
+                                  disabled={actionLoading !== null}
+                                  className="px-3 py-1 bg-yellow-600 text-white rounded hover:bg-yellow-700 text-xs font-semibold disabled:opacity-50 disabled:cursor-not-allowed"
+                                  title="Generate and set temporary password"
+                                >
+                                  Set Temp
+                                </button>
+                                <button
+                                  onClick={() => handleEmergencyReset(user.uid)}
+                                  disabled={actionLoading !== null}
+                                  className="px-3 py-1 bg-red-600 text-white rounded hover:bg-red-700 text-xs font-semibold disabled:opacity-50 disabled:cursor-not-allowed"
+                                  title="Emergency reset using hardcoded password (last resort)"
+                                >
+                                  Emergency
+                                </button>
+                              </>
                             )}
                             {getNextRank(user.rank) && (
                               <button
@@ -597,6 +646,54 @@ export default function AdminUsersPage() {
               onPromote={handlePromoteUser}
               loading={actionLoading === `promote-${promotingUser.uid}`}
               getRankDisplayName={getRankDisplayName}
+            />
+          )}
+
+          {/* Temporary Password Modal */}
+          {showTempPasswordModal && tempPasswordUserId && tempPasswordUserName && (
+            <TempPasswordModal
+              isOpen={showTempPasswordModal}
+              userId={tempPasswordUserId}
+              userName={tempPasswordUserName}
+              onClose={() => {
+                setShowTempPasswordModal(false);
+                setTempPasswordUserId('');
+                setTempPasswordUserName('');
+              }}
+              onPasswordSet={async () => {
+                await loadUsers(); // Refresh users to show updated temp password flag
+              }}
+            />
+          )}
+
+          {/* View Temporary Password Modal */}
+          {showViewTempPasswordModal && viewTempPasswordUserId && viewTempPasswordUserName && (
+            <ViewTempPasswordModal
+              isOpen={showViewTempPasswordModal}
+              userId={viewTempPasswordUserId}
+              userName={viewTempPasswordUserName}
+              onClose={() => {
+                setShowViewTempPasswordModal(false);
+                setViewTempPasswordUserId('');
+                setViewTempPasswordUserName('');
+              }}
+            />
+          )}
+
+          {/* Emergency Reset Modal */}
+          {showEmergencyResetModal && emergencyResetUserId && emergencyResetUserName && (
+            <EmergencyResetModal
+              isOpen={showEmergencyResetModal}
+              userId={emergencyResetUserId}
+              userName={emergencyResetUserName}
+              onClose={() => {
+                setShowEmergencyResetModal(false);
+                setEmergencyResetUserId('');
+                setEmergencyResetUserName('');
+              }}
+              onPasswordReset={async () => {
+                await loadUsers(); // Refresh users to show updated temp password flag
+              }}
             />
           )}
         </div>
