@@ -25,6 +25,55 @@ interface ParsedRow {
   agentDisplayName: string;
 }
 
+function determineRank(
+  name: string,
+  nameRelationships: Map<string, { 
+    isLeader: boolean; 
+    isSupervisor: boolean; 
+    agents: string[];
+    hasUMsUnder: boolean;
+  }>
+): UserRank {
+  const info = nameRelationships.get(name);
+  if (!info) {
+    return 'ADV'; // Default to advisor if not found
+  }
+
+  // If they have UMs under them (SUMs have UMs as subordinates)
+  if (info.hasUMsUnder) {
+    return 'SUM';
+  }
+
+  // If they are a leader (in LEADER_UM_NAME column) and have agents
+  if (info.isLeader && info.agents.length > 0) {
+    return 'UM';
+  }
+
+  // If they are a supervisor (in SUP_NAME column) and have agents
+  if (info.isSupervisor && info.agents.length > 0) {
+    // Check if any of their agents are leaders (UMs)
+    const hasLeadersAsAgents = info.agents.some(agentName => {
+      const agentInfo = nameRelationships.get(agentName);
+      return agentInfo?.isLeader;
+    });
+    
+    if (hasLeadersAsAgents) {
+      return 'SUM';
+    }
+    
+    // Otherwise, they're a UM
+    return 'UM';
+  }
+
+  // If they appear as an agent but also have agents under them, they're an AUM
+  if (info.agents.length > 0 && !info.isLeader && !info.isSupervisor) {
+    return 'AUM';
+  }
+
+  // Default to advisor
+  return 'ADV';
+}
+
 export default function ImportPage() {
   const router = useRouter();
   const { user: currentUser, loading: authLoading } = useAuth();
@@ -52,15 +101,6 @@ export default function ImportPage() {
     }
   }, [authLoading, currentUser, router]);
 
-  // Don't render if not admin or still loading
-  if (authLoading) {
-    return null;
-  }
-
-  if (!currentUser || currentUser.role !== 'admin') {
-    return null;
-  }
-
   // Load agencies
   useEffect(() => {
     const loadAgencies = async () => {
@@ -77,7 +117,17 @@ export default function ImportPage() {
     if (currentUser && currentUser.role === 'admin') {
       loadAgencies();
     }
-  }, [currentUser, selectedAgency]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentUser]); // Only depend on currentUser, not selectedAgency (to avoid infinite loop)
+
+  // Don't render if not admin or still loading
+  if (authLoading) {
+    return null;
+  }
+
+  if (!currentUser || currentUser.role !== 'admin') {
+    return null;
+  }
 
   const parseCSV = (csv: string): ParsedRow[] => {
     const lines = csv.split('\n').filter(line => line.trim());

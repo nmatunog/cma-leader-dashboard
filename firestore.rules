@@ -2,43 +2,48 @@ rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
     
-    // Helper function to get user data
-    function getUserData() {
-      return get(/databases/$(database)/documents/users/$(request.auth.uid)).data;
-    }
-    
-    // Helper function to check if user is admin
+    // Helper function to check if current user is admin
+    // Only use AFTER user can read their own document (no circular dependency)
     function isAdmin() {
-      return request.auth != null && getUserData().role == 'admin';
+      return request.auth != null && 
+             exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
+             get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin' &&
+             get(/databases/$(database)/documents/users/$(request.auth.uid)).data.isActive == true;
     }
     
-    // Helper function to check if user is active
+    // Helper function to check if current user is active
+    // Only use AFTER user can read their own document (no circular dependency)
     function isActive() {
-      return request.auth != null && getUserData().isActive == true;
+      return request.auth != null && 
+             exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
+             get(/databases/$(database)/documents/users/$(request.auth.uid)).data.isActive == true;
     }
     
     // Users collection
     match /users/{userId} {
-      // Users can read their own data
+      // CRITICAL: Allow users to read their own data FIRST (no helper functions)
+      // This must come before admin checks to avoid circular dependency
       allow read: if request.auth != null && request.auth.uid == userId;
       
-      // Only admins can read all users
-      allow read: if isAdmin() && isActive();
+      // Admins can read all users
+      allow read: if isAdmin();
       
-      // Only admins can create/update users
-      allow create: if isAdmin() && isActive();
-      allow update: if isAdmin() && isActive();
+      // Allow users to create their own user document (for self-signup)
+      // Allow setup page to create first admin (request.auth == null for initial setup)
+      // Allow admins to create users
+      allow create: if request.auth == null || 
+                      (request.auth != null && request.auth.uid == userId) ||
+                      isAdmin();
+      allow update: if isAdmin();
+      allow delete: if isAdmin();
       
       // Users can update their own profile (limited fields)
+      // Note: No isActive() check here to avoid circular dependency
       allow update: if request.auth != null && 
-                    request.auth.uid == userId && 
-                    isActive() &&
+                    request.auth.uid == userId &&
                     // Only allow updating specific fields
                     request.resource.data.diff(resource.data).affectedKeys()
                       .hasOnly(['name', 'unitManager']);
-      
-      // Only admins can delete users
-      allow delete: if isAdmin() && isActive();
     }
     
     // Strategic planning goals collection
@@ -74,12 +79,22 @@ service cloud.firestore {
     
     // Agencies collection
     match /agencies/{document=**} {
-      // All authenticated users can read agencies (needed for dropdowns)
-      allow read: if request.auth != null && isActive();
+      // Allow public read access (needed for signup page dropdowns before authentication)
+      allow read: if true;
       
       // Only admins can write (add/update/delete agencies)
       allow write: if isAdmin() && isActive();
     }
+    
+    // Organizational hierarchy collection
+    match /organizational_hierarchy/{document=**} {
+      // Allow public read access (needed for signup page dropdowns before authentication)
+      allow read: if true;
+      
+      // Only admins can write (initialize/import hierarchy data)
+      allow write: if isAdmin() && isActive();
+    }
   }
 }
+
 

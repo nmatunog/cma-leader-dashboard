@@ -190,11 +190,22 @@ export async function getCurrentUser(): Promise<User | null> {
 
 /**
  * Send password reset email
+ * Note: For code-based users (@cma.local emails), email reset won't work.
+ * Admin must set a temporary password instead.
  */
-export async function resetPassword(email: string): Promise<{ success: boolean; error?: string }> {
+export async function resetPassword(email: string): Promise<{ success: boolean; error?: string; isCodeBased?: boolean }> {
   try {
+    // Check if this is a code-based user (email ends with @cma.local)
+    if (email.endsWith('@cma.local')) {
+      return { 
+        success: false, 
+        isCodeBased: true,
+        error: 'Code-based accounts cannot use email password reset. Please contact your administrator to set a temporary password.' 
+      };
+    }
+    
     await sendPasswordResetEmail(auth, email);
-    return { success: true };
+    return { success: true, isCodeBased: false };
   } catch (error) {
     console.error('Error sending password reset email:', error);
     let errorMessage = 'Failed to send password reset email';
@@ -207,12 +218,13 @@ export async function resetPassword(email: string): Promise<{ success: boolean; 
       }
     }
     
-    return { success: false, error: errorMessage };
+    return { success: false, error: errorMessage, isCodeBased: false };
   }
 }
 
 /**
  * Update user password (for authenticated users)
+ * Also clears isTempPassword flag if it was set
  */
 export async function changePassword(newPassword: string): Promise<{ success: boolean; error?: string }> {
   try {
@@ -222,6 +234,14 @@ export async function changePassword(newPassword: string): Promise<{ success: bo
     }
     
     await updatePassword(firebaseUser, newPassword);
+    
+    // Clear isTempPassword flag after password change
+    const userDocRef = doc(db, USERS_COLLECTION, firebaseUser.uid);
+    await updateDoc(userDocRef, {
+      isTempPassword: false,
+      updatedAt: serverTimestamp(),
+    });
+    
     return { success: true };
   } catch (error) {
     console.error('Error updating password:', error);

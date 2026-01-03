@@ -8,12 +8,14 @@ import { getAgencies } from '@/services/agency-service';
 import { getUnitsByAgency, getHierarchyByAgency } from '@/services/organizational-hierarchy-service';
 import { registerUser } from '@/lib/auth-service';
 import type { OrganizationalHierarchyEntry } from '@/services/organizational-hierarchy-service';
+import { Eye, EyeOff } from 'lucide-react';
 
 export default function SignupPage() {
   const router = useRouter();
   const { user: currentUser, loading: authLoading } = useAuth();
   const [formData, setFormData] = useState({
     code: '',
+    email: '',
     name: '',
     password: '',
     confirmPassword: '',
@@ -31,6 +33,10 @@ export default function SignupPage() {
     role?: string;
     unitManager?: string;
   } | null>(null);
+  const [showPassword, setShowPassword] = useState(false);
+  const [showConfirmPassword, setShowConfirmPassword] = useState(false);
+  const [nameSuggestions, setNameSuggestions] = useState<string[]>([]);
+  const [showSuggestions, setShowSuggestions] = useState(false);
 
   // Redirect if already logged in
   useEffect(() => {
@@ -80,6 +86,8 @@ export default function SignupPage() {
     if (!name || !formData.agencyName) {
       setHierarchyInfo(null);
       setAutoFilledData(null);
+      setNameSuggestions([]);
+      setShowSuggestions(false);
       return;
     }
 
@@ -88,13 +96,44 @@ export default function SignupPage() {
       const entries = await getHierarchyByAgency(formData.agencyName);
       
       // Try to match name (case-insensitive, flexible matching)
-      const normalizedInput = name.trim().toUpperCase().replace(/\s+/g, ' ');
+      // Normalize: remove periods, normalize spaces, uppercase
+      const normalizeName = (n: string) => {
+        return n.trim()
+          .toUpperCase()
+          .replace(/\./g, '') // Remove periods
+          .replace(/\s+/g, ' ') // Normalize spaces
+          .trim();
+      };
+      
+      const normalizedInput = normalizeName(name);
+      
+      // Generate suggestions (names that start with or contain the input)
+      if (normalizedInput.length >= 2) {
+        const suggestions = entries
+          .filter(e => {
+            const normalizedEntry = normalizeName(e.name);
+            return normalizedEntry.includes(normalizedInput) || normalizedInput.includes(normalizedEntry.substring(0, normalizedInput.length));
+          })
+          .map(e => e.name)
+          .slice(0, 10); // Limit to 10 suggestions
+        setNameSuggestions(suggestions);
+        setShowSuggestions(suggestions.length > 0 && name.length > 0);
+      } else {
+        setNameSuggestions([]);
+        setShowSuggestions(false);
+      }
+      
       const entry = entries.find(e => {
-        const normalizedEntry = e.name.trim().toUpperCase().replace(/\s+/g, ' ');
-        // Exact match or contains match
-        return normalizedEntry === normalizedInput || 
-               normalizedEntry.includes(normalizedInput) || 
-               normalizedInput.includes(normalizedEntry);
+        const normalizedEntry = normalizeName(e.name);
+        // Exact match
+        if (normalizedEntry === normalizedInput) return true;
+        // Contains match (either direction)
+        if (normalizedEntry.includes(normalizedInput) || normalizedInput.includes(normalizedEntry)) return true;
+        // Try matching without middle initials (e.g., "MARIA ESTRELLA C MATUNOG" vs "MARIA ESTRELLA MATUNOG")
+        const inputNoMiddle = normalizedInput.replace(/\s+[A-Z]\s+/g, ' ').replace(/\s+/g, ' ').trim();
+        const entryNoMiddle = normalizedEntry.replace(/\s+[A-Z]\s+/g, ' ').replace(/\s+/g, ' ').trim();
+        if (inputNoMiddle === entryNoMiddle && inputNoMiddle.length > 0) return true;
+        return false;
       });
       
       if (entry) {
@@ -109,10 +148,19 @@ export default function SignupPage() {
           unitManager: entry.unitManager,
         });
 
-        // Auto-select unit if we have unitManager
-        if (entry.unitManager && !formData.unitName) {
-          setFormData(prev => ({ ...prev, unitName: entry.unitManager }));
+        // Auto-select unit logic:
+        // 1. If they have a unitManager, select that
+        // 2. If they're an ADD/SUM/UM without a unitManager, select themselves
+        if (!formData.unitName) {
+          if (entry.unitManager) {
+            const unitManagerName: string = entry.unitManager;
+            setFormData(prev => ({ ...prev, unitName: unitManagerName }));
+          } else if (entry.rank === 'ADD' || entry.rank === 'SUM' || entry.rank === 'UM') {
+            // ADDs, SUMs, and UMs can select themselves as unit
+            setFormData(prev => ({ ...prev, unitName: entry.name }));
+          }
         }
+        setShowSuggestions(false); // Hide suggestions when exact match found
       } else {
         setHierarchyInfo(null);
         setAutoFilledData(null);
@@ -121,6 +169,8 @@ export default function SignupPage() {
       console.error('Error looking up user in hierarchy:', error);
       setHierarchyInfo(null);
       setAutoFilledData(null);
+      setNameSuggestions([]);
+      setShowSuggestions(false);
     }
   };
 
@@ -145,6 +195,12 @@ export default function SignupPage() {
       return;
     }
 
+    // Validate email format if provided
+    if (formData.email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(formData.email.trim())) {
+      setError('Please enter a valid email address');
+      return;
+    }
+
     // Check if user exists in hierarchy
     if (!hierarchyInfo || !autoFilledData) {
       setError('Name not found in organizational hierarchy. Please contact your administrator.');
@@ -154,8 +210,20 @@ export default function SignupPage() {
     setLoading(true);
 
     try {
-      // Generate email from code
-      const email = `${formData.code.toLowerCase().replace(/[^a-z0-9]/g, '')}@cma.local`;
+      // Use provided email, or generate from code if not provided
+      const email = formData.email.trim() || `${formData.code.toLowerCase().replace(/[^a-z0-9]/g, '')}@cma.local`;
+
+      // Determine unitManager from selected unitName
+      // If user selected themselves as unit, they have no unitManager (undefined)
+      // Otherwise, the selected unitName is their unitManager
+      let unitManager: string | undefined;
+      if (formData.unitName === formData.name) {
+        // User selected themselves - they are the unit manager (no manager above them)
+        unitManager = undefined;
+      } else {
+        // User selected someone else - that person is their unit manager
+        unitManager = formData.unitName;
+      }
 
       // Register user
       const result = await registerUser({
@@ -165,7 +233,7 @@ export default function SignupPage() {
         name: formData.name,
         role: autoFilledData.role as 'admin' | 'leader' | 'advisor',
         rank: autoFilledData.rank as 'ADMIN' | 'ADD' | 'SUM' | 'UM' | 'AUM' | 'ADV',
-        unitManager: autoFilledData.unitManager,
+        unitManager: unitManager,
         agencyName: formData.agencyName,
       }, 'self-signup');
 
@@ -228,6 +296,17 @@ export default function SignupPage() {
                 </p>
               </div>
             )}
+            
+            {formData.name && formData.agencyName && !hierarchyInfo && !autoFilledData && (
+              <div className="mb-4 p-4 bg-yellow-50 border border-yellow-200 rounded-lg">
+                <p className="text-sm text-yellow-800">
+                  <strong>⚠️ Name not found:</strong> "{formData.name}" was not found in the organizational hierarchy for "{formData.agencyName}".
+                </p>
+                <p className="text-xs text-yellow-700 mt-2">
+                  Please ensure the name matches exactly as it appears in the hierarchy. The "Create Account" button will be enabled once your name is found.
+                </p>
+              </div>
+            )}
 
             <form onSubmit={handleSubmit} className="space-y-4">
               <div>
@@ -244,7 +323,7 @@ export default function SignupPage() {
                 />
               </div>
 
-              <div>
+              <div className="relative">
                 <label className="block text-sm font-semibold text-slate-700 mb-2">
                   Full Name *
                 </label>
@@ -252,14 +331,59 @@ export default function SignupPage() {
                   type="text"
                   value={formData.name}
                   onChange={(e) => handleNameChange(e.target.value)}
+                  onFocus={() => {
+                    if (nameSuggestions.length > 0) {
+                      setShowSuggestions(true);
+                    }
+                  }}
+                  onBlur={() => {
+                    // Delay hiding suggestions to allow clicking on them
+                    setTimeout(() => setShowSuggestions(false), 200);
+                  }}
                   className="w-full p-3 border-2 border-slate-200 rounded-lg focus:border-[#D31145] focus:ring-2 focus:ring-[#D31145]/20"
                   placeholder="Enter your full name as it appears in the organization"
                   required
+                  autoComplete="name"
+                  list="name-suggestions"
                 />
+                {showSuggestions && nameSuggestions.length > 0 && (
+                  <div className="absolute z-50 w-full mt-1 bg-white border-2 border-slate-200 rounded-lg shadow-lg max-h-60 overflow-y-auto">
+                    {nameSuggestions.map((suggestion, index) => (
+                      <button
+                        key={index}
+                        type="button"
+                        onClick={() => {
+                          setFormData({ ...formData, name: suggestion });
+                          handleNameChange(suggestion);
+                          setShowSuggestions(false);
+                        }}
+                        className="w-full text-left px-4 py-2 hover:bg-slate-100 focus:bg-slate-100 focus:outline-none border-b border-slate-100 last:border-b-0"
+                      >
+                        {suggestion}
+                      </button>
+                    ))}
+                  </div>
+                )}
                 <p className="text-xs text-slate-500 mt-1">
                   Your name must match the organizational hierarchy
                 </p>
               </div>
+
+                    <div>
+                      <label className="block text-sm font-semibold text-slate-700 mb-2">
+                        Email Address (Optional)
+                      </label>
+                      <input
+                        type="email"
+                        value={formData.email}
+                        onChange={(e) => setFormData({ ...formData, email: e.target.value })}
+                        className="w-full p-3 border-2 border-slate-200 rounded-lg focus:border-[#D31145] focus:ring-2 focus:ring-[#D31145]/20"
+                        placeholder="Enter your email (optional - for email login)"
+                      />
+                      <p className="text-xs text-slate-500 mt-1">
+                        If provided, you can sign in with either your code or email. If not provided, a code-based email will be generated.
+                      </p>
+                    </div>
 
               <div>
                 <label className="block text-sm font-semibold text-slate-700 mb-2">
@@ -268,9 +392,11 @@ export default function SignupPage() {
                 <select
                   value={formData.agencyName}
                   onChange={(e) => {
-                    setFormData({ ...formData, agencyName: e.target.value, unitName: '' });
+                    setFormData({ ...formData, agencyName: e.target.value, unitName: '', name: '' });
                     setHierarchyInfo(null);
                     setAutoFilledData(null);
+                    setNameSuggestions([]);
+                    setShowSuggestions(false);
                   }}
                   className="w-full p-3 border-2 border-slate-200 rounded-lg focus:border-[#D31145] focus:ring-2 focus:ring-[#D31145]/20"
                   required
@@ -294,7 +420,7 @@ export default function SignupPage() {
                   }}
                   className="w-full p-3 border-2 border-slate-200 rounded-lg focus:border-[#D31145] focus:ring-2 focus:ring-[#D31145]/20"
                   required
-                  disabled={!formData.agencyName || units.length === 0 || !!autoFilledData?.unitManager}
+                  disabled={!formData.agencyName || units.length === 0}
                 >
                   <option value="">-- Select Unit --</option>
                   {units.map(unit => (
@@ -312,30 +438,60 @@ export default function SignupPage() {
                 <label className="block text-sm font-semibold text-slate-700 mb-2">
                   Password *
                 </label>
-                <input
-                  type="password"
-                  value={formData.password}
-                  onChange={(e) => setFormData({ ...formData, password: e.target.value })}
-                  className="w-full p-3 border-2 border-slate-200 rounded-lg focus:border-[#D31145] focus:ring-2 focus:ring-[#D31145]/20"
-                  placeholder="Minimum 6 characters"
-                  required
-                  minLength={6}
-                />
+                <div className="relative">
+                  <input
+                    type={showPassword ? "text" : "password"}
+                    value={formData.password}
+                    onChange={(e) => setFormData({ ...formData, password: e.target.value })}
+                    className="w-full p-3 pr-12 border-2 border-slate-200 rounded-lg focus:border-[#D31145] focus:ring-2 focus:ring-[#D31145]/20"
+                    placeholder="Minimum 6 characters"
+                    required
+                    minLength={6}
+                    autoComplete="new-password"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowPassword(!showPassword)}
+                    className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 focus:outline-none"
+                    tabIndex={-1}
+                  >
+                    {showPassword ? (
+                      <EyeOff className="w-5 h-5" />
+                    ) : (
+                      <Eye className="w-5 h-5" />
+                    )}
+                  </button>
+                </div>
               </div>
 
               <div>
                 <label className="block text-sm font-semibold text-slate-700 mb-2">
                   Confirm Password *
                 </label>
-                <input
-                  type="password"
-                  value={formData.confirmPassword}
-                  onChange={(e) => setFormData({ ...formData, confirmPassword: e.target.value })}
-                  className="w-full p-3 border-2 border-slate-200 rounded-lg focus:border-[#D31145] focus:ring-2 focus:ring-[#D31145]/20"
-                  placeholder="Re-enter your password"
-                  required
-                  minLength={6}
-                />
+                <div className="relative">
+                  <input
+                    type={showConfirmPassword ? "text" : "password"}
+                    value={formData.confirmPassword}
+                    onChange={(e) => setFormData({ ...formData, confirmPassword: e.target.value })}
+                    className="w-full p-3 pr-12 border-2 border-slate-200 rounded-lg focus:border-[#D31145] focus:ring-2 focus:ring-[#D31145]/20"
+                    placeholder="Re-enter your password"
+                    required
+                    minLength={6}
+                    autoComplete="new-password"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowConfirmPassword(!showConfirmPassword)}
+                    className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 focus:outline-none"
+                    tabIndex={-1}
+                  >
+                    {showConfirmPassword ? (
+                      <EyeOff className="w-5 h-5" />
+                    ) : (
+                      <Eye className="w-5 h-5" />
+                    )}
+                  </button>
+                </div>
               </div>
 
               <button

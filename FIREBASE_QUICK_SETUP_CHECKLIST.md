@@ -145,3 +145,4 @@ After completing the above:
 - User exists in Authentication but not in Firestore
 - Create the user document in Firestore (see Option A above)
 
+

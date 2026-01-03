@@ -155,6 +155,32 @@ export default function AdminUsersPage() {
     }
   };
 
+  const handleSetTempPassword = async (uid: string, setTemp: boolean) => {
+    const action = setTemp ? 'set' : 'clear';
+    const confirmMessage = setTemp 
+      ? 'Set temporary password flag? The user will be required to change their password on next login. Note: You must communicate the temporary password to the user separately (Firebase Admin SDK is required to set passwords directly).'
+      : 'Clear temporary password flag?';
+    
+    if (!confirm(confirmMessage)) return;
+
+    try {
+      setActionLoading(`temp-password-${uid}`);
+      const result = await updateUser(uid, { isTempPassword: setTemp });
+      if (result.success) {
+        await loadUsers();
+        alert(setTemp 
+          ? 'Temporary password flag set. User must change password on next login. Remember to communicate the temporary password to the user.'
+          : 'Temporary password flag cleared.');
+      } else {
+        alert(result.error || `Failed to ${action} temporary password flag`);
+      }
+    } catch (err) {
+      alert(err instanceof Error ? err.message : `Failed to ${action} temporary password flag`);
+    } finally {
+      setActionLoading(null);
+    }
+  };
+
   const handleDeleteUser = async (uid: string) => {
     if (!confirm('Are you sure you want to permanently delete this user? This action cannot be undone.')) return;
     if (!confirm('This will delete the user from the system. Are you absolutely sure?')) return;
@@ -412,11 +438,16 @@ export default function AdminUsersPage() {
                         <td className="p-4">{user.agencyName}</td>
                         <td className="p-4">{user.unitManager || '-'}</td>
                         <td className="p-4">
-                          {user.isActive ? (
-                            <span className="px-2 py-1 bg-green-100 text-green-800 rounded text-xs font-semibold">Active</span>
-                          ) : (
-                            <span className="px-2 py-1 bg-red-100 text-red-800 rounded text-xs font-semibold">Inactive</span>
-                          )}
+                          <div className="flex flex-col gap-1">
+                            {user.isActive ? (
+                              <span className="px-2 py-1 bg-green-100 text-green-800 rounded text-xs font-semibold">Active</span>
+                            ) : (
+                              <span className="px-2 py-1 bg-red-100 text-red-800 rounded text-xs font-semibold">Inactive</span>
+                            )}
+                            {user.isTempPassword && (
+                              <span className="px-2 py-1 bg-amber-100 text-amber-800 rounded text-xs font-semibold">Temp Password</span>
+                            )}
+                          </div>
                         </td>
                         <td className="p-4 text-sm text-slate-600">
                           {(() => {
@@ -462,6 +493,25 @@ export default function AdminUsersPage() {
                                 title="Reactivate user"
                               >
                                 {actionLoading === `reactivate-${user.uid}` ? '...' : 'Activate'}
+                              </button>
+                            )}
+                            {user.isTempPassword ? (
+                              <button
+                                onClick={() => handleSetTempPassword(user.uid, false)}
+                                disabled={actionLoading !== null}
+                                className="px-3 py-1 bg-amber-600 text-white rounded hover:bg-amber-700 text-xs font-semibold disabled:opacity-50 disabled:cursor-not-allowed"
+                                title="Clear temporary password flag"
+                              >
+                                {actionLoading === `temp-password-${user.uid}` ? '...' : 'Clear Temp'}
+                              </button>
+                            ) : (
+                              <button
+                                onClick={() => handleSetTempPassword(user.uid, true)}
+                                disabled={actionLoading !== null}
+                                className="px-3 py-1 bg-yellow-600 text-white rounded hover:bg-yellow-700 text-xs font-semibold disabled:opacity-50 disabled:cursor-not-allowed"
+                                title="Set temporary password flag"
+                              >
+                                {actionLoading === `temp-password-${user.uid}` ? '...' : 'Set Temp'}
                               </button>
                             )}
                             {getNextRank(user.rank) && (
@@ -569,6 +619,7 @@ function UserCreateModal({
 }) {
   const [formData, setFormData] = useState<UserCreateData>({
     email: '',
+    code: '',
     password: '',
     name: '',
     role: 'advisor',
@@ -608,6 +659,7 @@ function UserCreateModal({
       // Reset form
       setFormData({
         email: '',
+        code: '',
         password: '',
         name: '',
         role: 'advisor',
@@ -645,6 +697,20 @@ function UserCreateModal({
                 className="w-full p-2 border-2 border-slate-200 rounded-lg focus:border-[#D31145] focus:ring-2 focus:ring-[#D31145]/20"
                 required
               />
+            </div>
+
+            <div>
+              <label className="block text-sm font-semibold text-slate-700 mb-2">Advisor/Leader Code (Optional)</label>
+              <input
+                type="text"
+                value={formData.code || ''}
+                onChange={(e) => setFormData({ ...formData, code: e.target.value.toUpperCase() })}
+                className="w-full p-2 border-2 border-slate-200 rounded-lg focus:border-[#D31145] focus:ring-2 focus:ring-[#D31145]/20"
+                placeholder="Enter advisor/leader code"
+              />
+              <p className="text-xs text-slate-500 mt-1">
+                If provided, user can sign in with either code or email
+              </p>
             </div>
 
             <div>

@@ -22,6 +22,7 @@ export interface User {
   isActive: boolean;
   createdBy?: string;             // UID of admin who created this user
   emailVerified?: boolean;
+  isTempPassword?: boolean;       // If true, user must change password on next login
 }
 
 export interface UserCreateData {
@@ -42,6 +43,7 @@ export interface UserUpdateData {
   unitManager?: string;
   agencyName?: string;
   isActive?: boolean;
+  isTempPassword?: boolean;
 }
 
 export interface AuthUser {

@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation';
 import { loginUser, resetPassword } from '@/lib/auth-service';
 import { useAuth } from '@/contexts/auth-context';
 import { Sidebar } from '@/components/sidebar';
+import { Eye, EyeOff } from 'lucide-react';
 
 export default function LoginPage() {
   const router = useRouter();
@@ -13,6 +14,7 @@ export default function LoginPage() {
   const [code, setCode] = useState('');
   const [useCode, setUseCode] = useState(false); // Default to email-based login (better for admin)
   const [password, setPassword] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState('');
   const [showForgotPassword, setShowForgotPassword] = useState(false);
@@ -59,6 +61,12 @@ export default function LoginPage() {
       const result = await loginUser(loginEmail, password);
       
       if (result.success && result.user) {
+        // Check if user has temporary password - redirect to password change
+        if (result.user.isTempPassword) {
+          router.push('/change-password');
+          return;
+        }
+        
         // Redirect based on role
         if (result.user.role === 'admin') {
           router.push('/reports');
@@ -181,6 +189,9 @@ export default function LoginPage() {
                 <p className="text-xs text-slate-500 mt-1">
                   Enter your advisor/leader code or email address
                 </p>
+                <p className="text-xs text-amber-600 mt-2 font-medium">
+                  ⚠️ Note: Code-based accounts cannot use email reset. Contact your administrator to set a temporary password.
+                </p>
               </div>
               <button
                 type="submit"
@@ -272,16 +283,31 @@ export default function LoginPage() {
                 <label className="block text-xs font-bold text-slate-600 uppercase mb-2 tracking-wide">
                   Password
                 </label>
-                <input
-                  type="password"
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                  className="w-full p-3.5 border-2 border-slate-200 rounded-xl outline-none focus:border-[#D31145] focus:ring-2 focus:ring-[#D31145]/20 transition-all shadow-sm text-base"
-                  placeholder="Enter your password"
-                  required
-                  disabled={isLoading}
-                  autoComplete="current-password"
-                />
+                <div className="relative">
+                  <input
+                    type={showPassword ? "text" : "password"}
+                    value={password}
+                    onChange={(e) => setPassword(e.target.value)}
+                    className="w-full p-3.5 pr-12 border-2 border-slate-200 rounded-xl outline-none focus:border-[#D31145] focus:ring-2 focus:ring-[#D31145]/20 transition-all shadow-sm text-base"
+                    placeholder="Enter your password"
+                    required
+                    disabled={isLoading}
+                    autoComplete="current-password"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowPassword(!showPassword)}
+                    className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 focus:outline-none"
+                    disabled={isLoading}
+                    tabIndex={-1}
+                  >
+                    {showPassword ? (
+                      <EyeOff className="w-5 h-5" />
+                    ) : (
+                      <Eye className="w-5 h-5" />
+                    )}
+                  </button>
+                </div>
               </div>
               <button
                 type="button"

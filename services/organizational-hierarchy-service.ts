@@ -163,6 +163,13 @@ export async function getUnitsByAgency(agencyName: string): Promise<string[]> {
       }
     });
 
+    // Also add UMs as selectable units (so UMs can select themselves)
+    entries.forEach(entry => {
+      if (entry.rank === 'UM') {
+        units.add(entry.name);
+      }
+    });
+
     return Array.from(units).sort();
   } catch (error) {
     console.error('Error getting units by agency:', error);

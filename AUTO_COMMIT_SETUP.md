@@ -178,3 +178,4 @@ pkill -f auto-commit.sh
 - Consider squashing auto-commits before pushing to main branch
 - The script runs in the background and won't interrupt your work
 
+
