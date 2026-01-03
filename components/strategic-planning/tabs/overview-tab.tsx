@@ -1544,7 +1544,7 @@ function IndirectOverrideExpansion() {
       <div className="space-y-6 sm:space-y-8">
         {/* AD or DD Table */}
         <div className="bg-white rounded-lg shadow-md p-4 sm:p-5 md:p-6 border-2 border-[#D31145]/30">
-          <h4 className="text-base sm:text-lg md:text-xl font-bold text-[#D31145] mb-3 sm:mb-4 leading-tight">AD or DD (Assistant Director / Divisional Director)</h4>
+          <h4 className="text-base sm:text-lg md:text-xl font-bold text-[#D31145] mb-3 sm:mb-4 leading-tight">AD or DD (Agency Director / District Director)</h4>
           <div className="overflow-x-auto -mx-2 sm:mx-0">
             <div className="inline-block min-w-full align-middle">
               <table className="w-full text-xs sm:text-sm md:text-base">
