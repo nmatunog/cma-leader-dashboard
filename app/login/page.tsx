@@ -11,8 +11,6 @@ export default function LoginPage() {
   const router = useRouter();
   const { user, loading } = useAuth();
   const [email, setEmail] = useState('');
-  const [code, setCode] = useState('');
-  const [useCode, setUseCode] = useState(false); // Default to email-based login (better for admin)
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
@@ -38,27 +36,13 @@ export default function LoginPage() {
     setIsLoading(true);
 
     try {
-      let loginEmail = '';
-      
-      if (useCode) {
-        // Convert code to email format
-        if (!code.trim()) {
-          setError('Please enter your code');
-          setIsLoading(false);
-          return;
-        }
-        loginEmail = `${code.trim().toLowerCase().replace(/[^a-z0-9]/g, '')}@cma.local`;
-      } else {
-        // Use email directly
-        if (!email.trim()) {
-          setError('Please enter your email');
-          setIsLoading(false);
-          return;
-        }
-        loginEmail = email.trim();
+      if (!email.trim()) {
+        setError('Please enter your email');
+        setIsLoading(false);
+        return;
       }
 
-      const result = await loginUser(loginEmail, password);
+      const result = await loginUser(email.trim(), password);
       
       if (result.success && result.user) {
         // Check if user has temporary password - redirect to password change
@@ -89,19 +73,12 @@ export default function LoginPage() {
     setError('');
     
     if (!resetEmail.trim()) {
-      setError('Please enter your email address or code');
+      setError('Please enter your email address');
       return;
     }
 
     try {
-      // Check if it looks like a code (no @ symbol) or email
-      let emailToUse = resetEmail.trim();
-      if (!emailToUse.includes('@')) {
-        // It's a code, convert to email format
-        emailToUse = `${emailToUse.toLowerCase().replace(/[^a-z0-9]/g, '')}@cma.local`;
-      }
-
-      const result = await resetPassword(emailToUse);
+      const result = await resetPassword(resetEmail.trim());
       if (result.success) {
         setResetSent(true);
         setError('');
@@ -175,22 +152,19 @@ export default function LoginPage() {
             <form onSubmit={handleForgotPassword} className="space-y-5">
               <div>
                 <label className="block text-xs font-bold text-slate-600 uppercase mb-2 tracking-wide">
-                  Code or Email Address
+                  Email Address
                 </label>
                 <input
-                  type="text"
+                  type="email"
                   value={resetEmail}
                   onChange={(e) => setResetEmail(e.target.value)}
                   className="w-full p-3.5 border-2 border-slate-200 rounded-xl outline-none focus:border-[#D31145] focus:ring-2 focus:ring-[#D31145]/20 transition-all shadow-sm text-base"
-                  placeholder="Enter your code or email"
+                  placeholder="Enter your email address"
                   required
                   disabled={isLoading}
                 />
                 <p className="text-xs text-slate-500 mt-1">
-                  Enter your advisor/leader code or email address
-                </p>
-                <p className="text-xs text-amber-600 mt-2 font-medium">
-                  ⚠️ Note: Code-based accounts cannot use email reset. Contact your administrator to set a temporary password.
+                  Enter your email address to receive a password reset link
                 </p>
               </div>
               <button
@@ -211,74 +185,21 @@ export default function LoginPage() {
             </form>
           ) : (
             <form onSubmit={handleLogin} className="space-y-5">
-              <div className="flex items-center justify-center gap-4 mb-2">
-                <button
-                  type="button"
-                  onClick={() => {
-                    setUseCode(true);
-                    setEmail('');
-                    setError('');
-                  }}
-                  className={`px-4 py-2 rounded-lg text-sm font-semibold transition-all ${
-                    useCode
-                      ? 'bg-[#D31145] text-white shadow-md'
-                      : 'bg-slate-200 text-slate-600 hover:bg-slate-300'
-                  }`}
+              <div>
+                <label className="block text-xs font-bold text-slate-600 uppercase mb-2 tracking-wide">
+                  Email Address
+                </label>
+                <input
+                  type="email"
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  className="w-full p-3.5 border-2 border-slate-200 rounded-xl outline-none focus:border-[#D31145] focus:ring-2 focus:ring-[#D31145]/20 transition-all shadow-sm text-base"
+                  placeholder="Enter your email"
+                  required
                   disabled={isLoading}
-                >
-                  Code
-                </button>
-                <button
-                  type="button"
-                  onClick={() => {
-                    setUseCode(false);
-                    setCode('');
-                    setError('');
-                  }}
-                  className={`px-4 py-2 rounded-lg text-sm font-semibold transition-all ${
-                    !useCode
-                      ? 'bg-[#D31145] text-white shadow-md'
-                      : 'bg-slate-200 text-slate-600 hover:bg-slate-300'
-                  }`}
-                  disabled={isLoading}
-                >
-                  Email
-                </button>
+                  autoComplete="email"
+                />
               </div>
-
-              {useCode ? (
-                <div>
-                  <label className="block text-xs font-bold text-slate-600 uppercase mb-2 tracking-wide">
-                    Advisor/Leader Code
-                  </label>
-                  <input
-                    type="text"
-                    value={code}
-                    onChange={(e) => setCode(e.target.value.toUpperCase())}
-                    className="w-full p-3.5 border-2 border-slate-200 rounded-xl outline-none focus:border-[#D31145] focus:ring-2 focus:ring-[#D31145]/20 transition-all shadow-sm text-base"
-                    placeholder="Enter your code"
-                    required
-                    disabled={isLoading}
-                    autoComplete="username"
-                  />
-                </div>
-              ) : (
-                <div>
-                  <label className="block text-xs font-bold text-slate-600 uppercase mb-2 tracking-wide">
-                    Email Address
-                  </label>
-                  <input
-                    type="email"
-                    value={email}
-                    onChange={(e) => setEmail(e.target.value)}
-                    className="w-full p-3.5 border-2 border-slate-200 rounded-xl outline-none focus:border-[#D31145] focus:ring-2 focus:ring-[#D31145]/20 transition-all shadow-sm text-base"
-                    placeholder="Enter your email"
-                    required
-                    disabled={isLoading}
-                    autoComplete="email"
-                  />
-                </div>
-              )}
               <div>
                 <label className="block text-xs font-bold text-slate-600 uppercase mb-2 tracking-wide">
                   Password
