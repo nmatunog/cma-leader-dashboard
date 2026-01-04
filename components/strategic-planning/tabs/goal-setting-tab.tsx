@@ -14,6 +14,55 @@ import {
 } from '../utils/bonus-calculations';
 import { saveStrategicPlanningGoal, getUserGoal, type StrategicPlanningGoal } from '@/services/strategic-planning-service';
 import { generateStrategicPlanningPDF } from '../utils/pdf-generator';
+import { saveUserData, loadUserData } from '../utils/local-storage-persistence';
+
+interface GoalSettingSavedData {
+  // Monthly Goals
+  monthlyGoalTarget: string;
+  monthlyCurrentFYP: string;
+  monthlyGoalFYC: string;
+  monthlyGoalFYP: string;
+  monthlyTeamGoalFYC: string;
+  monthlyTeamGoalFYP: string;
+  commRate: number;
+  
+  // Quarterly Personal FYC (for leaders)
+  q1PersonalFYC: string;
+  q2PersonalFYC: string;
+  q3PersonalFYC: string;
+  q4PersonalFYC: string;
+  
+  // Quarterly Team FYC (for leaders)
+  q1TeamFYC: string;
+  q2TeamFYC: string;
+  q3TeamFYC: string;
+  q4TeamFYC: string;
+  
+  // Quarterly FYC (for advisors/backward compatibility)
+  q1FYC: string;
+  q2FYC: string;
+  q3FYC: string;
+  q4FYC: string;
+  
+  // Quarterly Recruits
+  q1Recruits: string;
+  q2Recruits: string;
+  q3Recruits: string;
+  q4Recruits: string;
+  
+  // Base Manpower (for leaders)
+  q1BaseManpower: string;
+  q2BaseManpower: string;
+  q3BaseManpower: string;
+  q4BaseManpower: string;
+  
+  // Case Count and Persistency
+  q1Cases: string;
+  q2Cases: string;
+  q3Cases: string;
+  q4Cases: string;
+  persistency: number;
+}
 
 interface GoalSettingTabProps {
   userState: UserState;
@@ -572,7 +621,132 @@ export function GoalSettingTab({ userState, originalUserRole, onShowAI, simulati
     }
   }, [simulationData, isLeader, onSimulationDataUsed, commRate]);
 
-  // Load saved goal data for the logged-in user
+  // Load saved data from localStorage on mount (before Firestore)
+  useEffect(() => {
+    if (!userState?.uid || simulationData) return; // Skip if simulation data is being used
+    
+    const savedData = loadUserData<GoalSettingSavedData>(userState.uid, 'goal_setting');
+    if (savedData) {
+      // Load all saved fields
+      if (savedData.monthlyGoalTarget) setMonthlyGoalTarget(savedData.monthlyGoalTarget);
+      if (savedData.monthlyCurrentFYP) setMonthlyCurrentFYP(savedData.monthlyCurrentFYP);
+      if (savedData.monthlyGoalFYC) setMonthlyGoalFYC(savedData.monthlyGoalFYC);
+      if (savedData.monthlyGoalFYP) setMonthlyGoalFYP(savedData.monthlyGoalFYP);
+      if (savedData.monthlyTeamGoalFYC) setMonthlyTeamGoalFYC(savedData.monthlyTeamGoalFYC);
+      if (savedData.monthlyTeamGoalFYP) setMonthlyTeamGoalFYP(savedData.monthlyTeamGoalFYP);
+      if (savedData.commRate) setCommRate(savedData.commRate);
+      
+      if (savedData.q1PersonalFYC) setQ1PersonalFYC(savedData.q1PersonalFYC);
+      if (savedData.q2PersonalFYC) setQ2PersonalFYC(savedData.q2PersonalFYC);
+      if (savedData.q3PersonalFYC) setQ3PersonalFYC(savedData.q3PersonalFYC);
+      if (savedData.q4PersonalFYC) setQ4PersonalFYC(savedData.q4PersonalFYC);
+      
+      if (savedData.q1TeamFYC) setQ1TeamFYC(savedData.q1TeamFYC);
+      if (savedData.q2TeamFYC) setQ2TeamFYC(savedData.q2TeamFYC);
+      if (savedData.q3TeamFYC) setQ3TeamFYC(savedData.q3TeamFYC);
+      if (savedData.q4TeamFYC) setQ4TeamFYC(savedData.q4TeamFYC);
+      
+      if (savedData.q1FYC) setQ1FYC(savedData.q1FYC);
+      if (savedData.q2FYC) setQ2FYC(savedData.q2FYC);
+      if (savedData.q3FYC) setQ3FYC(savedData.q3FYC);
+      if (savedData.q4FYC) setQ4FYC(savedData.q4FYC);
+      
+      if (savedData.q1Recruits) setQ1Recruits(savedData.q1Recruits);
+      if (savedData.q2Recruits) setQ2Recruits(savedData.q2Recruits);
+      if (savedData.q3Recruits) setQ3Recruits(savedData.q3Recruits);
+      if (savedData.q4Recruits) setQ4Recruits(savedData.q4Recruits);
+      
+      if (savedData.q1BaseManpower) setQ1BaseManpower(savedData.q1BaseManpower);
+      if (savedData.q2BaseManpower) setQ2BaseManpower(savedData.q2BaseManpower);
+      if (savedData.q3BaseManpower) setQ3BaseManpower(savedData.q3BaseManpower);
+      if (savedData.q4BaseManpower) setQ4BaseManpower(savedData.q4BaseManpower);
+      
+      if (savedData.q1Cases) setQ1Cases(savedData.q1Cases);
+      if (savedData.q2Cases) setQ2Cases(savedData.q2Cases);
+      if (savedData.q3Cases) setQ3Cases(savedData.q3Cases);
+      if (savedData.q4Cases) setQ4Cases(savedData.q4Cases);
+      
+      if (savedData.persistency) setPersistency(savedData.persistency);
+    }
+  }, [userState?.uid, simulationData]);
+
+  // Save data to localStorage whenever fields change
+  useEffect(() => {
+    if (!userState?.uid) return;
+    
+    const dataToSave: GoalSettingSavedData = {
+      monthlyGoalTarget,
+      monthlyCurrentFYP,
+      monthlyGoalFYC,
+      monthlyGoalFYP,
+      monthlyTeamGoalFYC,
+      monthlyTeamGoalFYP,
+      commRate,
+      q1PersonalFYC,
+      q2PersonalFYC,
+      q3PersonalFYC,
+      q4PersonalFYC,
+      q1TeamFYC,
+      q2TeamFYC,
+      q3TeamFYC,
+      q4TeamFYC,
+      q1FYC,
+      q2FYC,
+      q3FYC,
+      q4FYC,
+      q1Recruits,
+      q2Recruits,
+      q3Recruits,
+      q4Recruits,
+      q1BaseManpower,
+      q2BaseManpower,
+      q3BaseManpower,
+      q4BaseManpower,
+      q1Cases,
+      q2Cases,
+      q3Cases,
+      q4Cases,
+      persistency,
+    };
+    
+    saveUserData(userState.uid, 'goal_setting', dataToSave);
+  }, [
+    userState?.uid,
+    monthlyGoalTarget,
+    monthlyCurrentFYP,
+    monthlyGoalFYC,
+    monthlyGoalFYP,
+    monthlyTeamGoalFYC,
+    monthlyTeamGoalFYP,
+    commRate,
+    q1PersonalFYC,
+    q2PersonalFYC,
+    q3PersonalFYC,
+    q4PersonalFYC,
+    q1TeamFYC,
+    q2TeamFYC,
+    q3TeamFYC,
+    q4TeamFYC,
+    q1FYC,
+    q2FYC,
+    q3FYC,
+    q4FYC,
+    q1Recruits,
+    q2Recruits,
+    q3Recruits,
+    q4Recruits,
+    q1BaseManpower,
+    q2BaseManpower,
+    q3BaseManpower,
+    q4BaseManpower,
+    q1Cases,
+    q2Cases,
+    q3Cases,
+    q4Cases,
+    persistency,
+  ]);
+
+  // Load saved goal data for the logged-in user (from Firestore - can override localStorage)
   useEffect(() => {
     const loadSavedGoal = async () => {
       if (!userState?.uid || !userState?.agency) return;

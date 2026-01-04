@@ -11,6 +11,18 @@ import {
   getPersistencyMultiplier,
   getQPBRate,
 } from '../utils/bonus-calculations';
+import { saveUserData, loadUserData } from '../utils/local-storage-persistence';
+
+interface LeaderHQSavedData {
+  personalFYC: number;
+  activeRecruits: number;
+  tenuredCount: number;
+  tenuredProd: number;
+  newCount: number;
+  newProd: number;
+  leaderRank: 'ADD' | 'SUM' | 'UM' | 'AUM';
+  persistency: number;
+}
 
 interface LeaderHQTabProps {
   userState: UserState;
@@ -25,14 +37,18 @@ interface LeaderHQTabProps {
 }
 
 export function LeaderHQTab({ userState, onGenerateRecruitmentAd, onPushToGoals }: LeaderHQTabProps) {
-  const [personalFYC, setPersonalFYC] = useState(50000);
-  const [activeRecruits, setActiveRecruits] = useState(3);
-  const [tenuredCount, setTenuredCount] = useState(4);
-  const [tenuredProd, setTenuredProd] = useState(20000);
-  const [newCount, setNewCount] = useState(2);
-  const [newProd, setNewProd] = useState(30000);
-  const [leaderRank, setLeaderRank] = useState<'ADD' | 'SUM' | 'UM' | 'AUM'>('UM');
-  const [persistency, setPersistency] = useState(82.5);
+  // Load saved data on mount
+  const savedData = loadUserData<LeaderHQSavedData>(userState.uid, 'leader_hq');
+  
+  const [personalFYC, setPersonalFYC] = useState(savedData?.personalFYC ?? 50000);
+  const [tenuredCount, setTenuredCount] = useState(savedData?.tenuredCount ?? 4);
+  const [tenuredProd, setTenuredProd] = useState(savedData?.tenuredProd ?? 20000);
+  const [newCount, setNewCount] = useState(savedData?.newCount ?? 2);
+  const [newProd, setNewProd] = useState(savedData?.newProd ?? 30000);
+  // Active Recruits auto-syncs with New Count for consistency
+  const [activeRecruits, setActiveRecruits] = useState(savedData?.newCount ?? 2);
+  const [leaderRank, setLeaderRank] = useState<'ADD' | 'SUM' | 'UM' | 'AUM'>(savedData?.leaderRank ?? 'UM');
+  const [persistency, setPersistency] = useState(savedData?.persistency ?? 82.5);
   const [totalIncome, setTotalIncome] = useState(0);
   const [showBreakdown, setShowBreakdown] = useState(false);
   
@@ -61,6 +77,11 @@ export function LeaderHQTab({ userState, onGenerateRecruitmentAd, onPushToGoals 
   
   const chartRef = useRef<HTMLCanvasElement>(null);
   const chartInstanceRef = useRef<Chart | null>(null);
+
+  // Auto-sync activeRecruits with newCount for consistency
+  useEffect(() => {
+    setActiveRecruits(newCount);
+  }, [newCount]);
 
   useEffect(() => {
     const pFYC = personalFYC || 0;
@@ -169,6 +190,22 @@ export function LeaderHQTab({ userState, onGenerateRecruitmentAd, onPushToGoals 
     }
   }, [personalFYC, activeRecruits, tenuredCount, tenuredProd, newCount, newProd, leaderRank, persistency]);
 
+  // Save data to localStorage when values change (skip initial load)
+  useEffect(() => {
+    const dataToSave: LeaderHQSavedData = {
+      personalFYC,
+      activeRecruits,
+      tenuredCount,
+      tenuredProd,
+      newCount,
+      newProd,
+      leaderRank,
+      persistency,
+    };
+    
+    saveUserData(userState.uid, 'leader_hq', dataToSave);
+  }, [personalFYC, activeRecruits, tenuredCount, tenuredProd, newCount, newProd, leaderRank, persistency, userState.uid]);
+
   return (
     <section className="space-y-6">
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
@@ -215,8 +252,9 @@ export function LeaderHQTab({ userState, onGenerateRecruitmentAd, onPushToGoals 
                   <input
                     type="number"
                     value={activeRecruits}
-                    onChange={(e) => setActiveRecruits(parseInt(e.target.value) || 0)}
-                    className="w-full text-sm p-2.5 border-2 border-slate-200 rounded-lg focus:border-[#D31145] focus:ring-2 focus:ring-[#D31145]/20 transition-all shadow-sm"
+                    readOnly
+                    className="w-full text-sm p-2.5 border-2 border-slate-200 rounded-lg bg-slate-50 text-slate-600 cursor-not-allowed"
+                    title="Automatically syncs with New Recruits count"
                   />
                 </div>
               </div>
