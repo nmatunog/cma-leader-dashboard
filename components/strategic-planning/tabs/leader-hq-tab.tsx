@@ -12,6 +12,9 @@ import {
   getQPBRate,
 } from '../utils/bonus-calculations';
 import { saveUserData, loadUserData } from '../utils/local-storage-persistence';
+import { ActivityPlanningChat } from '../activity-planning-chat';
+import { ActivityPlanResult } from '../activity-plan-result';
+import { generateActivityPlanFromChatData } from './leader-hq-tab-integration-helper';
 
 interface LeaderHQSavedData {
   personalFYC: number;
@@ -26,7 +29,15 @@ interface LeaderHQSavedData {
 
 interface LeaderHQTabProps {
   userState: UserState;
-  onGenerateRecruitmentAd: () => void;
+  onGenerateRecruitmentAd: (context: {
+    personalFYC: number;
+    activeRecruits: number;
+    tenuredCount: number;
+    tenuredProd: number;
+    newCount: number;
+    newProd: number;
+    persistency: number;
+  }) => void;
   onPushToGoals?: (data: {
     personalFYC: number;
     tenuredCount: number;
@@ -51,6 +62,9 @@ export function LeaderHQTab({ userState, onGenerateRecruitmentAd, onPushToGoals 
   const [persistency, setPersistency] = useState(savedData?.persistency ?? 82.5);
   const [totalIncome, setTotalIncome] = useState(0);
   const [showBreakdown, setShowBreakdown] = useState(false);
+  const [showActivityChat, setShowActivityChat] = useState(false);
+  const [activityPlanResult, setActivityPlanResult] = useState<string | null>(null);
+  const [isGeneratingPlan, setIsGeneratingPlan] = useState(false);
   
   // Breakdown values for display
   const [breakdown, setBreakdown] = useState({
@@ -351,10 +365,10 @@ export function LeaderHQTab({ userState, onGenerateRecruitmentAd, onPushToGoals 
               </button>
             )}
             <button
-              onClick={onGenerateRecruitmentAd}
+              onClick={() => setShowActivityChat(true)}
               className="w-full bg-gradient-to-r from-purple-600 to-blue-600 text-white font-bold py-3.5 rounded-xl hover:shadow-lg hover:scale-[1.02] transition-all shadow-md flex items-center justify-center gap-2 text-sm"
             >
-              <span className="text-lg">✨</span> Draft Recruitment Post
+              <span className="text-lg">✨</span> AI Assisted Activity Planning
             </button>
           </div>
         </div>
@@ -523,6 +537,81 @@ export function LeaderHQTab({ userState, onGenerateRecruitmentAd, onPushToGoals 
           </div>
         </div>
       </div>
+
+      {/* Activity Planning Chat Expansion Card */}
+      {showActivityChat && (
+        <div className="bg-white rounded-xl shadow-lg border border-slate-200 overflow-hidden">
+          <div className="p-4 bg-gradient-to-r from-purple-50 to-blue-50 border-b border-slate-200">
+            <div className="flex items-center justify-between">
+              <h3 className="font-bold text-lg text-slate-800">AI Assisted Activity Planning</h3>
+              <button
+                onClick={() => {
+                  setShowActivityChat(false);
+                  setActivityPlanResult(null);
+                }}
+                className="w-7 h-7 rounded-full bg-white hover:bg-slate-100 text-slate-500 hover:text-slate-700 flex items-center justify-center text-sm transition-colors"
+                aria-label="Close"
+              >
+                ✕
+              </button>
+            </div>
+          </div>
+          <div className="p-4" style={{ height: '600px', display: 'flex', flexDirection: 'column' }}>
+            {!activityPlanResult ? (
+              <ActivityPlanningChat
+                onComplete={async (chatData) => {
+                  setIsGeneratingPlan(true);
+                  try {
+                    const result = await generateActivityPlanFromChatData(
+                      userState,
+                      {
+                        personalFYC,
+                        activeRecruits,
+                        tenuredCount,
+                        tenuredProd,
+                        newCount,
+                        newProd,
+                        persistency,
+                      },
+                      chatData
+                    );
+                    if (result.success && result.response) {
+                      setActivityPlanResult(result.response);
+                    } else {
+                      alert(`Error: ${result.error || 'Failed to generate activity plan'}`);
+                    }
+                  } catch (error) {
+                    console.error('Error generating plan:', error);
+                    alert('Failed to generate activity plan. Please try again.');
+                  } finally {
+                    setIsGeneratingPlan(false);
+                  }
+                }}
+                onCancel={() => {
+                  setShowActivityChat(false);
+                  setActivityPlanResult(null);
+                }}
+              />
+            ) : (
+              <ActivityPlanResult
+                content={activityPlanResult}
+                onClose={() => {
+                  setActivityPlanResult(null);
+                  setShowActivityChat(false);
+                }}
+              />
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* Activity Plan Result (if generated, separate from chat) */}
+      {activityPlanResult && !showActivityChat && (
+        <ActivityPlanResult
+          content={activityPlanResult}
+          onClose={() => setActivityPlanResult(null)}
+        />
+      )}
     </section>
   );
 }
