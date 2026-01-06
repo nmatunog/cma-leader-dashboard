@@ -750,6 +750,7 @@ export default function AdminUsersPage() {
               }}
               onSubmit={handleUpdateUser}
               loading={actionLoading?.startsWith('edit-') || false}
+              isSuperuser={isSuperuser(currentUser)}
             />
           )}
 
@@ -875,6 +876,12 @@ function UserCreateModal({
 
     if (formData.password.length < 6) {
       setError('Password must be at least 6 characters');
+      return;
+    }
+    
+    // Allow "No Agency" for admins/superusers only
+    if (formData.agencyName === 'No Agency' && formData.role !== 'admin' && formData.role !== 'superuser') {
+      setError('"No Agency" option is only available for admins and superusers');
       return;
     }
 
@@ -1029,6 +1036,9 @@ function UserCreateModal({
                 required
               >
                 <option value="">Select Agency</option>
+                {(isSuperuser || formData.role === 'admin' || formData.role === 'superuser') && (
+                  <option value="No Agency">No Agency</option>
+                )}
                 {agencies.map(agency => (
                   <option key={agency} value={agency}>{agency}</option>
                 ))}
@@ -1116,6 +1126,12 @@ function UserEditModal({
     // Validate
     if (!formData.name || !formData.agencyName) {
       setError('Please fill in all required fields');
+      return;
+    }
+    
+    // Allow "No Agency" for admins/superusers only
+    if (formData.agencyName === 'No Agency' && user.role !== 'admin' && user.role !== 'superuser') {
+      setError('"No Agency" option is only available for admins and superusers');
       return;
     }
 
@@ -1262,6 +1278,9 @@ function UserEditModal({
                 required
               >
                 <option value="">Select Agency</option>
+                {(isSuperuser || formData.role === 'admin' || formData.role === 'superuser') && (
+                  <option value="No Agency">No Agency</option>
+                )}
                 {agencies.map(agency => (
                   <option key={agency} value={agency}>{agency}</option>
                 ))}

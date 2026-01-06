@@ -282,8 +282,15 @@ export default function ReportsPage() {
     });
 
     // STEP 3: Calculate agency totals from unit totals (agency-level consolidation)
+    // Exclude "No Agency" from agency totals
     Object.values(agg.byUnit).forEach(unitData => {
       const agencyName = unitData.agencyName;
+      
+      // Skip "No Agency" entries - they should not be included in agency totals
+      if (agencyName === 'No Agency') {
+        return;
+      }
+      
       if (!agg.byAgency[agencyName]) {
         agg.byAgency[agencyName] = {
           count: 0,
@@ -303,7 +310,7 @@ export default function ReportsPage() {
       agg.byAgency[agencyName].income += unitData.income;
     });
 
-    // STEP 4: Calculate overall totals from agency totals
+    // STEP 4: Calculate overall totals from agency totals (excluding "No Agency")
     Object.values(agg.byAgency).forEach(agencyData => {
       agg.totalManpower += agencyData.manpower;
       agg.totalNewRecruits += agencyData.newRecruits;
@@ -381,7 +388,10 @@ export default function ReportsPage() {
     return true;
   });
 
-  const agencies = Array.from(new Set(goals.map(g => g.agencyName))).sort();
+  // Filter out "No Agency" from agency filter options (but still show in individual goal listings)
+  const agencies = Array.from(new Set(goals.map(g => g.agencyName)))
+    .filter(agency => agency !== 'No Agency')
+    .sort();
   const ranks = Array.from(new Set(goals.map(g => g.userRank))).sort();
   
   // Get unique units - filter by agency if an agency is selected
