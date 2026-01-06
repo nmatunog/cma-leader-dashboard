@@ -6,7 +6,7 @@ import { formatNumberWithCommas, parseCommaNumber, handleNumberInputChange } fro
 import {
   getFYCBonusRate,
   getCaseCountBonusRate,
-  getPersistencyMultiplier,
+  getPersonalPersistencyMultiplier,
 } from '../utils/bonus-calculations';
 
 interface AdvisorSimTabProps {
@@ -82,7 +82,7 @@ export function AdvisorSimTab({ onPushToGoals }: AdvisorSimTabProps = {}) {
 
   useEffect(() => {
     // ACS 3.0 Calculation
-    const persMultiplier = getPersistencyMultiplier(persistency);
+    const persMultiplier = getPersonalPersistencyMultiplier(persistency);
     
     // FYC Bonus (requires persistency >= 75%)
     const fycBonusRate = getFYCBonusRate(fyc, isNewAdvisor);
@@ -111,7 +111,7 @@ export function AdvisorSimTab({ onPushToGoals }: AdvisorSimTabProps = {}) {
       chartInstanceRef.current.destroy();
     }
 
-    const persMultiplier = getPersistencyMultiplier(persistency);
+    const persMultiplier = getPersonalPersistencyMultiplier(persistency);
     const fycBonusRate = getFYCBonusRate(fyc, isNewAdvisor);
     const fycBonusAmount = fyc * fycBonusRate * persMultiplier;
     const caseBonusRate = fycBonusRate > 0 ? getCaseCountBonusRate(cases) : 0;
@@ -202,12 +202,22 @@ export function AdvisorSimTab({ onPushToGoals }: AdvisorSimTabProps = {}) {
         <div className="lg:col-span-8 bg-white rounded-xl p-6 shadow-sm">
           {onPushToGoals && (
             <button
-              onClick={() => {
-                onPushToGoals({
-                  fyc: fyc, // fyc is already quarterly
-                  cases: cases,
-                  persistency: persistency,
-                });
+              onClick={(e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                try {
+                  const data = {
+                    fyc: fyc || 0, // fyc is already quarterly
+                    cases: cases || 0,
+                    persistency: persistency || 82.5,
+                  };
+                  
+                  console.log('Advisor Sim: Pushing to goals:', data);
+                  onPushToGoals(data);
+                } catch (error) {
+                  console.error('Error pushing to goals:', error);
+                  alert('Error pushing data to Goal Setting. Please try again.');
+                }
               }}
               className="w-full mb-4 bg-gradient-to-r from-green-600 to-emerald-600 text-white font-bold py-3.5 rounded-xl hover:shadow-lg hover:scale-[1.02] transition-all shadow-md flex items-center justify-center gap-2 text-sm"
             >

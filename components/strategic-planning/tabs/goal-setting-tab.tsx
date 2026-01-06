@@ -8,13 +8,14 @@ import {
   getFYCBonusRate,
   getCaseCountBonusRate,
   getPersistencyMultiplier,
+  getPersonalPersistencyMultiplier,
   getSelfOverrideRate,
   getDPIRate,
   getQPBRate,
 } from '../utils/bonus-calculations';
 import { saveStrategicPlanningGoal, getUserGoal, type StrategicPlanningGoal } from '@/services/strategic-planning-service';
 import { generateStrategicPlanningPDF } from '../utils/pdf-generator';
-import { saveUserData, loadUserData } from '../utils/local-storage-persistence';
+import { saveUserData, loadUserData, clearUserData } from '../utils/local-storage-persistence';
 
 interface GoalSettingSavedData {
   // Monthly Goals
@@ -74,6 +75,7 @@ interface GoalSettingTabProps {
     tenuredProd?: number;
     newCount?: number;
     newProd?: number;
+    activeRecruits?: number; // Add activeRecruits for Self Override
     // Advisor simulation data
     fyc?: number;
     cases?: number;
@@ -134,7 +136,8 @@ function getBonusPrompt(currentFYC: number): { message: string; type: 'congrats'
 export function GoalSettingTab({ userState, originalUserRole, onShowAI, simulationData, onSimulationDataUsed }: GoalSettingTabProps) {
   // Use original user role to determine if they're actually a leader
   // This prevents leaders from submitting as advisors
-  const isActualLeader = originalUserRole === 'leader' || originalUserRole === 'admin';
+  const isActualLeader = originalUserRole === 'leader' || originalUserRole === 'admin' || originalUserRole === 'superuser';
+  const [simulationDataProcessed, setSimulationDataProcessed] = useState(false);
   // Use view role for UI display purposes
   const isLeaderView = userState.role === 'leader';
   // For submission and data logic, always use actual leader status
@@ -191,6 +194,8 @@ export function GoalSettingTab({ userState, originalUserRole, onShowAI, simulati
   const [submitMessage, setSubmitMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
   const [manualEditConfirmation, setManualEditConfirmation] = useState<string | null>(null);
   const [quarterlyGoalsAutoPopulated, setQuarterlyGoalsAutoPopulated] = useState(false);
+  // Use ref to persist dataLoaded across tab navigations
+  const dataLoadedRef = useRef(false);
   const [dataLoaded, setDataLoaded] = useState(false);
   
   // Case Count and Persistency for Personal FYC bonuses (both Advisor and Leader)
@@ -211,8 +216,11 @@ export function GoalSettingTab({ userState, originalUserRole, onShowAI, simulati
   // Leader income breakdown
   const [leaderPersonalFYC, setLeaderPersonalFYC] = useState(0);
   const [leaderPersonalBonuses, setLeaderPersonalBonuses] = useState(0);
+  const [leaderPPB, setLeaderPPB] = useState(0); // Track PPB separately
+  const [leaderCaseCountBonus, setLeaderCaseCountBonus] = useState(0); // Track Case Count Bonus separately
   const [leaderDPI, setLeaderDPI] = useState(0);
   const [leaderQPB, setLeaderQPB] = useState(0);
+  const [leaderSelfOverride, setLeaderSelfOverride] = useState(0); // Track Self Override separately for breakdown
   const [leaderTotalAnnual, setLeaderTotalAnnual] = useState(0);
   const [leaderAvgQuarterly, setLeaderAvgQuarterly] = useState(0);
   const [leaderAvgMonthly, setLeaderAvgMonthly] = useState(0);
@@ -235,13 +243,19 @@ export function GoalSettingTab({ userState, originalUserRole, onShowAI, simulati
     let bonus = 0;
     const qData = [monthlyFYC];
     
-    const persMultiplier = getPersistencyMultiplier(persistency);
+    // Use Personal Persistency Multiplier for Personal bonuses (PPB and Case Count)
+    // Use Team Persistency Multiplier for Team bonuses (DPI and QPB)
+    const personalPersMultiplier = isLeader ? getPersonalPersistencyMultiplier(persistency) : getPersistencyMultiplier(persistency);
+    const teamPersMultiplier = getPersistencyMultiplier(persistency); // Team Persistency can go up to 110%
     
     // Leader income tracking
     let leaderTotalPersonalFYC = 0;
     let leaderTotalPersonalBonuses = 0;
+    let leaderTotalPPB = 0; // Track PPB separately
+    let leaderTotalCaseCountBonus = 0; // Track Case Count Bonus separately
     let leaderTotalDPI = 0;
     let leaderTotalQPB = 0;
+    let leaderTotalSelfOverride = 0; // Track Self Override separately for Leader Bonuses
     
     for (let q = 1; q <= 4; q++) {
       let qVal = 0;
@@ -271,20 +285,28 @@ export function GoalSettingTab({ userState, originalUserRole, onShowAI, simulati
         
         // Personal FYC bonuses (PPB, Case Count, Persistency, Self-Override)
         const personalFYCBonusRate = getFYCBonusRate(qPersonalFYC);
-        const personalFYCBonus = qPersonalFYC * personalFYCBonusRate * persMultiplier;
+        const personalFYCBonus = qPersonalFYC * personalFYCBonusRate * personalPersMultiplier;
         
         const caseBonusRate = personalFYCBonusRate > 0 ? getCaseCountBonusRate(qCases) : 0;
-        const caseBonus = qPersonalFYC * caseBonusRate * persMultiplier;
+        const caseBonus = qPersonalFYC * caseBonusRate * personalPersMultiplier;
         
-        // Self-Override (based on Active New Recruits) - WITH persistency multiplier
+        // Self-Override (based on Active New Recruits) - NO persistency multiplier
         let qRec = 0;
         if (q === 1) qRec = parseInt(q1Recruits) || 0;
         else if (q === 2) qRec = parseInt(q2Recruits) || 0;
         else if (q === 3) qRec = parseInt(q3Recruits) || 0;
         else if (q === 4) qRec = parseInt(q4Recruits) || 0;
         
-        const selfOverrideRate = getSelfOverrideRate(qRec);
-        const selfOverride = qPersonalFYC * selfOverrideRate * persMultiplier; // Apply persistency multiplier
+        // Self Override is calculated from MONTHLY Personal FYC, not quarterly
+        // Convert quarterly Personal FYC to monthly for calculation
+        const monthlyPersonalFYC = qPersonalFYC / 3;
+        // Convert quarterly recruits to monthly for Self Override calculation
+        // Self Override rate is based on monthly active recruits (3+ = 10%)
+        const monthlyRecruits = qRec / 3;
+        const selfOverrideRate = getSelfOverrideRate(monthlyRecruits);
+        // Calculate monthly Self Override (NO persistency multiplier), then multiply by 3 to get quarterly
+        const monthlySelfOverride = monthlyPersonalFYC * selfOverrideRate;
+        const selfOverride = monthlySelfOverride * 3; // Quarterly Self Override
         
         // Team FYC bonuses (QPB: Tiered by Team Quarterly FYC, DPI: 20-30% based on rank)
         // ACS 3.0: Total Direct Override = (Base DPI + QPB Bonus) x Persistency Multiplier
@@ -299,8 +321,7 @@ export function GoalSettingTab({ userState, originalUserRole, onShowAI, simulati
         const baseQPB = qTeamFYC * qpbRate; // Base QPB before persistency multiplier
         
         // Apply Team Persistency Multiplier to (Base DPI + QPB Bonus)
-        // Persistency multiplier uses Team Persistency (2-Year Team Persistency)
-        const teamPersMultiplier = getPersistencyMultiplier(persistency); // Team Persistency multiplier
+        // Team Persistency multiplier can go up to 110% (uses getPersistencyMultiplier)
         const totalDirectOverride = (baseDPI + baseQPB) * teamPersMultiplier; // Total Direct Override
         
         // Calculate DPI and QPB after multiplier (for tracking purposes)
@@ -310,10 +331,15 @@ export function GoalSettingTab({ userState, originalUserRole, onShowAI, simulati
         const teamBonus = totalDirectOverride; // Total Direct Override = (Base DPI + QPB) x Multiplier
         
         // Track leader income sources (after persistency multiplier)
+        // Leader Bonuses = QPB (with persistency multiplier) + Self Override (NO persistency multiplier)
+        // Personal Bonuses = PPB + Case Count (Self Override moved to Leader Bonuses)
         leaderTotalPersonalFYC += qPersonalFYC;
-        leaderTotalPersonalBonuses += (personalFYCBonus + caseBonus + selfOverride);
+        leaderTotalPersonalBonuses += (personalFYCBonus + caseBonus); // Self Override moved to Leader Bonuses
+        leaderTotalPPB += personalFYCBonus; // Track PPB separately
+        leaderTotalCaseCountBonus += caseBonus; // Track Case Count Bonus separately
         leaderTotalDPI += dpiAmount;
-        leaderTotalQPB += qpbAmount;
+        leaderTotalQPB += qpbAmount; // QPB with persistency multiplier
+        leaderTotalSelfOverride += selfOverride; // Self Override (NO persistency multiplier)
         
         const qPersonalIncome = qPersonalFYC + personalFYCBonus + caseBonus + selfOverride;
         const qTeamIncome = teamBonus;
@@ -344,13 +370,13 @@ export function GoalSettingTab({ userState, originalUserRole, onShowAI, simulati
         qData.push(qVal);
         total += qVal;
         
-        // FYC Bonus with Persistency Multiplier
+        // FYC Bonus with Persistency Multiplier (Advisors use Personal Persistency Multiplier)
         const fycBonusRate = getFYCBonusRate(qVal);
-        const fycBonusAmount = qVal * fycBonusRate * persMultiplier;
+        const fycBonusAmount = qVal * fycBonusRate * personalPersMultiplier;
         
         // Case Count Bonus (requires FYC bonus qualification first)
         const caseBonusRate = fycBonusRate > 0 ? getCaseCountBonusRate(qCases) : 0;
-        const caseBonusAmount = qVal * caseBonusRate * persMultiplier;
+        const caseBonusAmount = qVal * caseBonusRate * personalPersMultiplier;
         
         const qTotalBonus = fycBonusAmount + caseBonusAmount;
         bonus += qTotalBonus;
@@ -368,14 +394,19 @@ export function GoalSettingTab({ userState, originalUserRole, onShowAI, simulati
       setTotalFYP((totalPersonal + totalTeam) / rate);
       
       // Calculate leader income totals
-      const leaderAnnualTotal = leaderTotalPersonalFYC + leaderTotalPersonalBonuses + leaderTotalDPI + leaderTotalQPB;
+      // Leader Bonuses = QPB (with persistency multiplier) + Self Override (NO persistency multiplier)
+      const leaderTotalBonuses = leaderTotalQPB + leaderTotalSelfOverride;
+      const leaderAnnualTotal = leaderTotalPersonalFYC + leaderTotalPersonalBonuses + leaderTotalDPI + leaderTotalBonuses;
       const leaderQuarterlyAvg = leaderAnnualTotal / 4;
       const leaderMonthlyAvg = leaderAnnualTotal / 12;
       
       setLeaderPersonalFYC(leaderTotalPersonalFYC);
       setLeaderPersonalBonuses(leaderTotalPersonalBonuses);
+      setLeaderPPB(leaderTotalPPB); // PPB component
+      setLeaderCaseCountBonus(leaderTotalCaseCountBonus); // Case Count Bonus component
       setLeaderDPI(leaderTotalDPI);
-      setLeaderQPB(leaderTotalQPB);
+      setLeaderQPB(leaderTotalQPB); // QPB component
+      setLeaderSelfOverride(leaderTotalSelfOverride); // Self Override component
       setLeaderTotalAnnual(leaderAnnualTotal);
       setLeaderAvgQuarterly(leaderQuarterlyAvg);
       setLeaderAvgMonthly(leaderMonthlyAvg);
@@ -549,43 +580,118 @@ export function GoalSettingTab({ userState, originalUserRole, onShowAI, simulati
   // Load simulation data from Leader HQ or Advisor Sim tab
   useEffect(() => {
     if (simulationData) {
+      console.log('Goal Setting: Simulation data received', {
+        simulationData,
+        isLeader,
+        hasPersonalFYC: simulationData.personalFYC !== undefined,
+        hasFYC: simulationData.fyc !== undefined,
+        isActualLeader,
+        originalUserRole
+      });
+      
       if (isLeader && simulationData.personalFYC !== undefined) {
         // Leader simulation data
-      // Convert monthly Personal FYC to quarterly (multiply by 3)
-      const quarterlyPersonalFYC = simulationData.personalFYC * 3;
-      const formattedPersonalFYC = formatNumberWithCommas(Math.round(quarterlyPersonalFYC).toString());
-      
-      // Set Personal FYC for all quarters
-      setQ1PersonalFYC(formattedPersonalFYC);
-      setQ2PersonalFYC(formattedPersonalFYC);
-      setQ3PersonalFYC(formattedPersonalFYC);
-      setQ4PersonalFYC(formattedPersonalFYC);
-      
-      // Convert monthly Team FYC to quarterly (multiply by 3)
-      const monthlyTeamFYC = (simulationData.tenuredCount * simulationData.tenuredProd) + (simulationData.newCount * simulationData.newProd);
-      const quarterlyTeamFYC = monthlyTeamFYC * 3;
-      const formattedTeamFYC = formatNumberWithCommas(Math.round(quarterlyTeamFYC).toString());
-      
-      // Set Team FYC for all quarters
-      setQ1TeamFYC(formattedTeamFYC);
-      setQ2TeamFYC(formattedTeamFYC);
-      setQ3TeamFYC(formattedTeamFYC);
-      setQ4TeamFYC(formattedTeamFYC);
-      
-      // Set monthly goal FYC (use personal FYC)
-      setMonthlyGoalFYC(formatNumberWithCommas(Math.round(simulationData.personalFYC).toString()));
-      
-      // Set team monthly goal FYC (reuse monthlyTeamFYC calculated above)
-      setMonthlyTeamGoalFYC(formatNumberWithCommas(Math.round(monthlyTeamFYC).toString()));
-      const monthlyTeamFYP = monthlyTeamFYC / (commRate / 100);
-      setMonthlyTeamGoalFYP(formatNumberWithCommas(Math.round(monthlyTeamFYP).toString()));
-      
-        // Clear simulation data after using it
-        if (onSimulationDataUsed) {
-          onSimulationDataUsed();
+        console.log('Goal Setting: Processing leader simulation data', {
+          personalFYC: simulationData.personalFYC,
+          tenuredCount: simulationData.tenuredCount,
+          tenuredProd: simulationData.tenuredProd,
+          newCount: simulationData.newCount,
+          newProd: simulationData.newProd,
+          isLeader
+        });
+        
+        // Convert monthly Personal FYC to quarterly (multiply by 3)
+        const quarterlyPersonalFYC = simulationData.personalFYC * 3;
+        const formattedPersonalFYC = formatNumberWithCommas(Math.round(quarterlyPersonalFYC).toString());
+        
+        // Set Personal FYC for all quarters
+        setQ1PersonalFYC(formattedPersonalFYC);
+        setQ2PersonalFYC(formattedPersonalFYC);
+        setQ3PersonalFYC(formattedPersonalFYC);
+        setQ4PersonalFYC(formattedPersonalFYC);
+        console.log('Goal Setting: Set quarterly Personal FYC to', formattedPersonalFYC);
+        
+        // Convert monthly Team FYC to quarterly (multiply by 3)
+        const monthlyTeamFYC = (simulationData.tenuredCount * simulationData.tenuredProd) + (simulationData.newCount * simulationData.newProd);
+        const quarterlyTeamFYC = monthlyTeamFYC * 3;
+        const formattedTeamFYC = formatNumberWithCommas(Math.round(quarterlyTeamFYC).toString());
+        
+        // Set Team FYC for all quarters
+        setQ1TeamFYC(formattedTeamFYC);
+        setQ2TeamFYC(formattedTeamFYC);
+        setQ3TeamFYC(formattedTeamFYC);
+        setQ4TeamFYC(formattedTeamFYC);
+        console.log('Goal Setting: Set quarterly Team FYC to', formattedTeamFYC);
+        
+        // Set monthly goal FYC (use personal FYC)
+        const monthlyPersonalFYCFormatted = formatNumberWithCommas(Math.round(simulationData.personalFYC).toString());
+        setMonthlyGoalFYC(monthlyPersonalFYCFormatted);
+        console.log('Goal Setting: Set monthly Personal FYC to', monthlyPersonalFYCFormatted);
+        
+        // Calculate and set monthly goal FYP from Personal FYC (FYP = FYC / 0.25)
+        const monthlyPersonalFYP = simulationData.personalFYC / 0.25;
+        const monthlyPersonalFYPFormatted = formatNumberWithCommas(Math.round(monthlyPersonalFYP).toString());
+        setMonthlyGoalFYP(monthlyPersonalFYPFormatted);
+        console.log('Goal Setting: Set monthly Personal FYP to', monthlyPersonalFYPFormatted);
+        
+        // Set team monthly goal FYC (reuse monthlyTeamFYC calculated above)
+        const monthlyTeamFYCFormatted = formatNumberWithCommas(Math.round(monthlyTeamFYC).toString());
+        setMonthlyTeamGoalFYC(monthlyTeamFYCFormatted);
+        console.log('Goal Setting: Set monthly Team FYC to', monthlyTeamFYCFormatted);
+        
+        const monthlyTeamFYP = monthlyTeamFYC / (commRate / 100);
+        const monthlyTeamFYPFormatted = formatNumberWithCommas(Math.round(monthlyTeamFYP).toString());
+        setMonthlyTeamGoalFYP(monthlyTeamFYPFormatted);
+        console.log('Goal Setting: Set monthly Team FYP to', monthlyTeamFYPFormatted);
+        
+        // Set recruits for all quarters (convert monthly activeRecruits to quarterly: multiply by 3)
+        // Active Recruits in Leader HQ is monthly, so quarterly = monthly * 3
+        if (simulationData.activeRecruits !== undefined) {
+          const quarterlyRecruits = Math.round(simulationData.activeRecruits * 3);
+          setQ1Recruits(quarterlyRecruits.toString());
+          setQ2Recruits(quarterlyRecruits.toString());
+          setQ3Recruits(quarterlyRecruits.toString());
+          setQ4Recruits(quarterlyRecruits.toString());
+          console.log('Goal Setting: Set quarterly recruits to', quarterlyRecruits, '(from monthly activeRecruits', simulationData.activeRecruits, '* 3)');
+        } else if (simulationData.newCount !== undefined) {
+          // Fallback: use newCount if activeRecruits not provided (newCount is monthly)
+          const quarterlyRecruits = Math.round(simulationData.newCount * 3);
+          setQ1Recruits(quarterlyRecruits.toString());
+          setQ2Recruits(quarterlyRecruits.toString());
+          setQ3Recruits(quarterlyRecruits.toString());
+          setQ4Recruits(quarterlyRecruits.toString());
+          console.log('Goal Setting: Set quarterly recruits to', quarterlyRecruits, '(from monthly newCount', simulationData.newCount, '* 3)');
         }
+        
+        // Clear localStorage to prevent old data from overriding new simulation data
+        if (userState?.uid) {
+          clearUserData(userState.uid, 'goal_setting');
+          console.log('Goal Setting: Cleared localStorage for leader to prevent override');
+        }
+        
+        // Mark simulation data as processed and mark data as loaded
+        // This prevents localStorage from loading old data after simulation
+        setSimulationDataProcessed(true);
+        dataLoadedRef.current = true; // Mark as loaded so localStorage won't override
+        setDataLoaded(true);
+        
+        // Clear simulation data after using it (with delay to ensure state updates complete)
+        setTimeout(() => {
+          if (onSimulationDataUsed) {
+            onSimulationDataUsed();
+          }
+          // Reset the flag after a delay
+          setTimeout(() => setSimulationDataProcessed(false), 1000);
+        }, 500);
       } else if (!isLeader && simulationData.fyc !== undefined) {
         // Advisor simulation data
+        console.log('Goal Setting: Processing advisor simulation data', {
+          fyc: simulationData.fyc,
+          cases: simulationData.cases,
+          persistency: simulationData.persistency,
+          isLeader
+        });
+        
         // Convert quarterly FYC to quarterly goals (fyc is already quarterly)
         const formattedFYC = formatNumberWithCommas(Math.round(simulationData.fyc).toString());
         
@@ -594,6 +700,7 @@ export function GoalSettingTab({ userState, originalUserRole, onShowAI, simulati
         setQ2FYC(formattedFYC);
         setQ3FYC(formattedFYC);
         setQ4FYC(formattedFYC);
+        console.log('Goal Setting: Set quarterly FYC to', formattedFYC);
         
         // Set cases for all quarters
         if (simulationData.cases !== undefined) {
@@ -602,31 +709,78 @@ export function GoalSettingTab({ userState, originalUserRole, onShowAI, simulati
           setQ2Cases(casesStr);
           setQ3Cases(casesStr);
           setQ4Cases(casesStr);
+          console.log('Goal Setting: Set quarterly cases to', casesStr);
         }
         
         // Set persistency
         if (simulationData.persistency !== undefined) {
           setPersistency(simulationData.persistency);
+          console.log('Goal Setting: Set persistency to', simulationData.persistency);
         }
         
         // Set monthly goal FYC (convert quarterly to monthly: divide by 3)
         const monthlyFYC = simulationData.fyc / 3;
-        setMonthlyGoalFYC(formatNumberWithCommas(Math.round(monthlyFYC).toString()));
+        const monthlyFYCFormatted = formatNumberWithCommas(Math.round(monthlyFYC).toString());
+        setMonthlyGoalFYC(monthlyFYCFormatted);
+        console.log('Goal Setting: Set monthly FYC to', monthlyFYCFormatted, '(from quarterly', simulationData.fyc, '/ 3)');
         
-        // Clear simulation data after using it
-        if (onSimulationDataUsed) {
-          onSimulationDataUsed();
+        // Calculate and set monthly goal FYP from FYC (FYP = FYC / 0.25)
+        const monthlyFYP = monthlyFYC / 0.25;
+        const monthlyFYPFormatted = formatNumberWithCommas(Math.round(monthlyFYP).toString());
+        setMonthlyGoalFYP(monthlyFYPFormatted);
+        console.log('Goal Setting: Set monthly FYP to', monthlyFYPFormatted);
+        
+        // Clear localStorage to prevent old data from overriding new simulation data
+        if (userState?.uid) {
+          clearUserData(userState.uid, 'goal_setting');
+          console.log('Goal Setting: Cleared localStorage to prevent override');
         }
+        
+        // Mark simulation data as processed and mark data as loaded
+        // This prevents localStorage from loading old data after simulation
+        setSimulationDataProcessed(true);
+        dataLoadedRef.current = true; // Mark as loaded so localStorage won't override
+        setDataLoaded(true);
+        
+        // Clear simulation data after using it (with delay to ensure state updates complete)
+        setTimeout(() => {
+          if (onSimulationDataUsed) {
+            onSimulationDataUsed();
+          }
+          // Reset the flag after a delay
+          setTimeout(() => setSimulationDataProcessed(false), 1000);
+        }, 500);
+      } else {
+        console.log('Goal Setting: Simulation data received but conditions not met', {
+          isLeader,
+          hasPersonalFYC: simulationData.personalFYC !== undefined,
+          hasFYC: simulationData.fyc !== undefined,
+          simulationData
+        });
       }
     }
-  }, [simulationData, isLeader, onSimulationDataUsed, commRate]);
-
-  // Load saved data from localStorage on mount (before Firestore)
+  }, [simulationData, isLeader, onSimulationDataUsed, commRate, isActualLeader, originalUserRole]);
+  
+  // Reset simulationDataProcessed flag when simulationData changes
   useEffect(() => {
-    if (!userState?.uid || simulationData) return; // Skip if simulation data is being used
+    if (!simulationData) {
+      setSimulationDataProcessed(false);
+    }
+  }, [simulationData]);
+
+  // Load saved data from localStorage FIRST (before Firestore)
+  // Prioritize localStorage as it contains the latest user edits
+  useEffect(() => {
+    // Only load if:
+    // 1. User is available
+    // 2. Data hasn't been loaded yet (check both state and ref)
+    // 3. No simulation data is being processed
+    // 4. Simulation data wasn't just processed
+    if (!userState?.uid || dataLoadedRef.current || dataLoaded || simulationData || simulationDataProcessed) return;
     
     const savedData = loadUserData<GoalSettingSavedData>(userState.uid, 'goal_setting');
     if (savedData) {
+      console.log('Goal Setting: Loading latest data from localStorage (user edits take priority)');
       // Load all saved fields
       if (savedData.monthlyGoalTarget) setMonthlyGoalTarget(savedData.monthlyGoalTarget);
       if (savedData.monthlyCurrentFYP) setMonthlyCurrentFYP(savedData.monthlyCurrentFYP);
@@ -636,20 +790,36 @@ export function GoalSettingTab({ userState, originalUserRole, onShowAI, simulati
       if (savedData.monthlyTeamGoalFYP) setMonthlyTeamGoalFYP(savedData.monthlyTeamGoalFYP);
       if (savedData.commRate) setCommRate(savedData.commRate);
       
-      if (savedData.q1PersonalFYC) setQ1PersonalFYC(savedData.q1PersonalFYC);
-      if (savedData.q2PersonalFYC) setQ2PersonalFYC(savedData.q2PersonalFYC);
-      if (savedData.q3PersonalFYC) setQ3PersonalFYC(savedData.q3PersonalFYC);
-      if (savedData.q4PersonalFYC) setQ4PersonalFYC(savedData.q4PersonalFYC);
-      
-      if (savedData.q1TeamFYC) setQ1TeamFYC(savedData.q1TeamFYC);
-      if (savedData.q2TeamFYC) setQ2TeamFYC(savedData.q2TeamFYC);
-      if (savedData.q3TeamFYC) setQ3TeamFYC(savedData.q3TeamFYC);
-      if (savedData.q4TeamFYC) setQ4TeamFYC(savedData.q4TeamFYC);
-      
-      if (savedData.q1FYC) setQ1FYC(savedData.q1FYC);
-      if (savedData.q2FYC) setQ2FYC(savedData.q2FYC);
-      if (savedData.q3FYC) setQ3FYC(savedData.q3FYC);
-      if (savedData.q4FYC) setQ4FYC(savedData.q4FYC);
+      // Load leader fields only if user is a leader
+      if (isLeader) {
+        if (savedData.q1PersonalFYC) {
+          console.log('Goal Setting: Loading q1PersonalFYC from localStorage:', savedData.q1PersonalFYC);
+          setQ1PersonalFYC(savedData.q1PersonalFYC);
+        }
+        if (savedData.q2PersonalFYC) {
+          console.log('Goal Setting: Loading q2PersonalFYC from localStorage:', savedData.q2PersonalFYC);
+          setQ2PersonalFYC(savedData.q2PersonalFYC);
+        }
+        if (savedData.q3PersonalFYC) {
+          console.log('Goal Setting: Loading q3PersonalFYC from localStorage:', savedData.q3PersonalFYC);
+          setQ3PersonalFYC(savedData.q3PersonalFYC);
+        }
+        if (savedData.q4PersonalFYC) {
+          console.log('Goal Setting: Loading q4PersonalFYC from localStorage:', savedData.q4PersonalFYC);
+          setQ4PersonalFYC(savedData.q4PersonalFYC);
+        }
+        
+        if (savedData.q1TeamFYC) setQ1TeamFYC(savedData.q1TeamFYC);
+        if (savedData.q2TeamFYC) setQ2TeamFYC(savedData.q2TeamFYC);
+        if (savedData.q3TeamFYC) setQ3TeamFYC(savedData.q3TeamFYC);
+        if (savedData.q4TeamFYC) setQ4TeamFYC(savedData.q4TeamFYC);
+      } else {
+        // Load advisor fields only if user is an advisor
+        if (savedData.q1FYC) setQ1FYC(savedData.q1FYC);
+        if (savedData.q2FYC) setQ2FYC(savedData.q2FYC);
+        if (savedData.q3FYC) setQ3FYC(savedData.q3FYC);
+        if (savedData.q4FYC) setQ4FYC(savedData.q4FYC);
+      }
       
       if (savedData.q1Recruits) setQ1Recruits(savedData.q1Recruits);
       if (savedData.q2Recruits) setQ2Recruits(savedData.q2Recruits);
@@ -667,12 +837,20 @@ export function GoalSettingTab({ userState, originalUserRole, onShowAI, simulati
       if (savedData.q4Cases) setQ4Cases(savedData.q4Cases);
       
       if (savedData.persistency) setPersistency(savedData.persistency);
+      
+      // Mark data as loaded so we don't load again (both state and ref)
+      dataLoadedRef.current = true;
+      setDataLoaded(true);
+    } else {
+      // Even if no saved data, mark as loaded to prevent future loads
+      dataLoadedRef.current = true;
+      setDataLoaded(true);
     }
-  }, [userState?.uid, simulationData]);
+  }, [userState?.uid, dataLoaded, simulationData, simulationDataProcessed, isLeader]);
 
   // Save data to localStorage whenever fields change
   useEffect(() => {
-    if (!userState?.uid) return;
+    if (!userState?.uid || simulationData || simulationDataProcessed) return; // Don't save while processing simulation data
     
     const dataToSave: GoalSettingSavedData = {
       monthlyGoalTarget,
@@ -744,18 +922,42 @@ export function GoalSettingTab({ userState, originalUserRole, onShowAI, simulati
     q3Cases,
     q4Cases,
     persistency,
+    simulationData,
+    simulationDataProcessed,
   ]);
 
-  // Load saved goal data for the logged-in user (from Firestore - can override localStorage)
+  // Load saved goal data for the logged-in user (from Firestore - only if localStorage is empty)
+  // localStorage takes priority as it contains the latest user edits
   useEffect(() => {
     const loadSavedGoal = async () => {
       if (!userState?.uid || !userState?.agency) return;
-      // Don't load saved data if we just pushed simulation data
-      if (simulationData) return;
+      
+      // Check if localStorage has data first - if it does, don't load from Firestore
+      const localStorageData = loadUserData<GoalSettingSavedData>(userState.uid, 'goal_setting');
+      if (localStorageData) {
+        console.log('Goal Setting: Skipping Firestore load - localStorage has latest data (user edits)');
+        // Mark as loaded if not already
+        if (!dataLoadedRef.current) {
+          dataLoadedRef.current = true;
+          setDataLoaded(true);
+        }
+        return;
+      }
+      
+      // Don't load saved data if:
+      // 1. Simulation data is currently being processed
+      // 2. Simulation data was just processed
+      // 3. Data has already been loaded (to prevent overriding user edits)
+      if (simulationData || simulationDataProcessed || dataLoadedRef.current || dataLoaded) {
+        console.log('Goal Setting: Skipping Firestore load - simulationData:', !!simulationData, 'simulationDataProcessed:', simulationDataProcessed, 'dataLoaded:', dataLoadedRef.current || dataLoaded);
+        return;
+      }
       
       try {
         const savedGoal = await getUserGoal(userState.uid, userState.agency);
         if (savedGoal) {
+          console.log('Goal Setting: Loading data from Firestore (localStorage was empty)', savedGoal);
+          dataLoadedRef.current = true;
           setDataLoaded(true);
           // Load monthly goal data
           if (savedGoal.monthlyTargetFYP > 0) {
@@ -789,16 +991,24 @@ export function GoalSettingTab({ userState, originalUserRole, onShowAI, simulati
             // Note: Saved goal has combined fyc, we'll split it proportionally or use all as personal
             // For now, assume all saved FYC is personal (can be enhanced later)
             if (savedGoal.q1.fyc > 0) {
-              setQ1PersonalFYC(formatNumberWithCommas(savedGoal.q1.fyc.toString()));
+              const q1Value = formatNumberWithCommas(savedGoal.q1.fyc.toString());
+              console.log('Goal Setting: Loading q1PersonalFYC from Firestore:', q1Value);
+              setQ1PersonalFYC(q1Value);
             }
             if (savedGoal.q2.fyc > 0) {
-              setQ2PersonalFYC(formatNumberWithCommas(savedGoal.q2.fyc.toString()));
+              const q2Value = formatNumberWithCommas(savedGoal.q2.fyc.toString());
+              console.log('Goal Setting: Loading q2PersonalFYC from Firestore:', q2Value);
+              setQ2PersonalFYC(q2Value);
             }
             if (savedGoal.q3.fyc > 0) {
-              setQ3PersonalFYC(formatNumberWithCommas(savedGoal.q3.fyc.toString()));
+              const q3Value = formatNumberWithCommas(savedGoal.q3.fyc.toString());
+              console.log('Goal Setting: Loading q3PersonalFYC from Firestore:', q3Value);
+              setQ3PersonalFYC(q3Value);
             }
             if (savedGoal.q4.fyc > 0) {
-              setQ4PersonalFYC(formatNumberWithCommas(savedGoal.q4.fyc.toString()));
+              const q4Value = formatNumberWithCommas(savedGoal.q4.fyc.toString());
+              console.log('Goal Setting: Loading q4PersonalFYC from Firestore:', q4Value);
+              setQ4PersonalFYC(q4Value);
             }
             
             // Base manpower and recruits
@@ -832,15 +1042,21 @@ export function GoalSettingTab({ userState, originalUserRole, onShowAI, simulati
           if (savedGoal.q2.cases) setQ2Cases(savedGoal.q2.cases.toString());
           if (savedGoal.q3.cases) setQ3Cases(savedGoal.q3.cases.toString());
           if (savedGoal.q4.cases) setQ4Cases(savedGoal.q4.cases.toString());
-        }
+      } else {
+        // Even if no saved goal, mark as loaded to prevent future loads
+        dataLoadedRef.current = true;
+        setDataLoaded(true);
+      }
       } catch (error) {
         console.error('Error loading saved goal:', error);
-        // Silently fail - user can still enter new data
+        // Mark as loaded even on error to prevent retries
+        dataLoadedRef.current = true;
+        setDataLoaded(true);
       }
     };
     
     loadSavedGoal();
-  }, [userState?.uid, userState?.agency, isLeader, simulationData]);
+  }, [userState?.uid, userState?.agency, isLeader, simulationData, simulationDataProcessed, dataLoaded]);
 
   // Note: Removed automatic loading from localStorage for advisors
   // Data will only be loaded when "Push to Goal Setting" button is clicked in Advisor Sim
@@ -1070,6 +1286,16 @@ export function GoalSettingTab({ userState, originalUserRole, onShowAI, simulati
                       // Always calculate FYP from FYC using 25% rate (FYP = FYC / 0.25)
                       const fyp = newFYC / 0.25;
                       setMonthlyGoalFYP(formatNumberWithCommas(Math.round(fyp).toString()));
+                      
+                      // Sync quarterly Personal goals for leaders: quarterly = monthly * 3
+                      if (isLeader) {
+                        const quarterlyPersonalFYC = Math.round(newFYC * 3);
+                        const quarterlyPersonalFYCFormatted = formatNumberWithCommas(quarterlyPersonalFYC.toString());
+                        setQ1PersonalFYC(quarterlyPersonalFYCFormatted);
+                        setQ2PersonalFYC(quarterlyPersonalFYCFormatted);
+                        setQ3PersonalFYC(quarterlyPersonalFYCFormatted);
+                        setQ4PersonalFYC(quarterlyPersonalFYCFormatted);
+                      }
                   });
                 }}
                 className="w-full p-2.5 sm:p-3 border-2 border-[#D31145]/30 rounded-lg focus:border-[#D31145] focus:ring-2 focus:ring-[#D31145]/20 transition-all shadow-sm font-bold bg-white text-sm sm:text-base"
@@ -1097,6 +1323,16 @@ export function GoalSettingTab({ userState, originalUserRole, onShowAI, simulati
                     // Always calculate FYC from FYP using 25% rate (FYC = FYP * 0.25)
                     const fyc = newFYP * 0.25;
                     setMonthlyGoalFYC(formatNumberWithCommas(Math.round(fyc).toString()));
+                    
+                    // Sync quarterly Personal goals for leaders: quarterly = monthly * 3
+                    if (isLeader) {
+                      const quarterlyPersonalFYC = Math.round(fyc * 3);
+                      const quarterlyPersonalFYCFormatted = formatNumberWithCommas(quarterlyPersonalFYC.toString());
+                      setQ1PersonalFYC(quarterlyPersonalFYCFormatted);
+                      setQ2PersonalFYC(quarterlyPersonalFYCFormatted);
+                      setQ3PersonalFYC(quarterlyPersonalFYCFormatted);
+                      setQ4PersonalFYC(quarterlyPersonalFYCFormatted);
+                    }
                   });
                 }}
                 className="w-full p-2.5 sm:p-3 border-2 border-[#D31145]/30 rounded-lg focus:border-[#D31145] focus:ring-2 focus:ring-[#D31145]/20 transition-all shadow-sm font-bold bg-white text-sm sm:text-base"
@@ -1504,23 +1740,25 @@ export function GoalSettingTab({ userState, originalUserRole, onShowAI, simulati
               <div className="flex items-center gap-2 mb-3">
                 <span className="text-xl">📋</span>
                 <h4 className="text-sm sm:text-base font-bold text-blue-900">
-                  Case Count Per Quarter (For Case Count Bonus)
+                  Personal Case Count Per Quarter (For Case Count Bonus)
                 </h4>
               </div>
               <p className="text-[10px] sm:text-xs text-blue-700 mb-3 font-medium">
                 Requires 2+ months active. Bonus: 5% (3 cases), 10% (5 cases), 15% (7 cases), 20% (9+ cases)
               </p>
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
-                {[1, 2, 3, 4].map((q) => {
-                  const value = q === 1 ? q1Cases : q === 2 ? q2Cases : q === 3 ? q3Cases : q4Cases;
-                  const setValue = q === 1 ? setQ1Cases : q === 2 ? setQ2Cases : q === 3 ? setQ3Cases : setQ4Cases;
-                  const caseCount = parseInt(value) || 0;
-                  const caseBonusRate = getCaseCountBonusRate(caseCount);
-                  const qFYC = q === 1 ? (parseCommaNumber(q1FYC) || 0) :
-                               q === 2 ? (parseCommaNumber(q2FYC) || 0) :
-                               q === 3 ? (parseCommaNumber(q3FYC) || 0) : (parseCommaNumber(q4FYC) || 0);
-                  const persMultiplier = getPersistencyMultiplier(persistency);
-                  const caseBonus = qFYC > 0 ? qFYC * caseBonusRate * persMultiplier : 0;
+                {(() => {
+                  // Calculate persistency multiplier once outside the map
+                  const persMultiplier = getPersonalPersistencyMultiplier(persistency);
+                  return [1, 2, 3, 4].map((q) => {
+                    const value = q === 1 ? q1Cases : q === 2 ? q2Cases : q === 3 ? q3Cases : q4Cases;
+                    const setValue = q === 1 ? setQ1Cases : q === 2 ? setQ2Cases : q === 3 ? setQ3Cases : setQ4Cases;
+                    const caseCount = parseInt(value) || 0;
+                    const caseBonusRate = getCaseCountBonusRate(caseCount);
+                    const qFYC = q === 1 ? (parseCommaNumber(q1FYC) || 0) :
+                                 q === 2 ? (parseCommaNumber(q2FYC) || 0) :
+                                 q === 3 ? (parseCommaNumber(q3FYC) || 0) : (parseCommaNumber(q4FYC) || 0);
+                    const caseBonus = qFYC > 0 ? qFYC * caseBonusRate * persMultiplier : 0;
                   
                   return (
                     <div key={q} className={`p-2.5 border-2 rounded-lg ${
@@ -1560,18 +1798,19 @@ export function GoalSettingTab({ userState, originalUserRole, onShowAI, simulati
                       )}
                     </div>
                   );
-                })}
+                  });
+                })()}
               </div>
               
               {/* Persistency Input for Advisors */}
               <div className="mt-3 pt-3 border-t border-blue-300">
                 <div className="flex items-center justify-between">
                   <div>
-                    <label className="text-xs font-bold text-blue-900 mb-1 block">{isLeader ? '2-Year Team Persistency (%)' : '2-Year Persistency (%)'}</label>
+                    <label className="text-xs font-bold text-blue-900 mb-1 block">{isLeader ? 'Personal 2 Year Persistency (%)' : '2-Year Persistency (%)'}</label>
                     <p className="text-[10px] text-blue-700">
                       {isLeader 
-                        ? 'Multiplier: 80% (75%+), 100% (82.5%+), 110% (90%+) - Applied to (DPI + QPB)'
-                        : 'Multiplier: 80% (75%+), 100% (82.5%+), 110% (90%+)'}
+                        ? 'Multiplier: 80% (75%+), 100% (82.5%+) - Applied to Personal PPB and Case Count Bonus'
+                        : 'Multiplier: 80% (75%+), 100% (82.5%+)'}
                     </p>
                   </div>
                   <input
@@ -1587,9 +1826,9 @@ export function GoalSettingTab({ userState, originalUserRole, onShowAI, simulati
                 {persistency > 0 && (
                   <div className="mt-2 p-2 bg-blue-100 rounded-lg">
                     <div className="text-[10px] sm:text-xs text-blue-800 font-bold">
-                      {isLeader ? 'Team ' : ''}Persistency Multiplier: {Math.round(getPersistencyMultiplier(persistency) * 100)}%
-                      {persistency >= 90 && <span className="text-green-700 ml-1">⭐ Max!</span>}
-                      {persistency >= 82.5 && persistency < 90 && <span className="text-blue-700 ml-1">✓</span>}
+                      {isLeader ? 'Personal ' : ''}Persistency Multiplier: {Math.round(getPersonalPersistencyMultiplier(persistency) * 100)}%
+                      {persistency >= 82.5 && <span className="text-green-700 ml-1">⭐ Max!</span>}
+                      {persistency >= 75 && persistency < 82.5 && <span className="text-blue-700 ml-1">✓</span>}
                     </div>
                   </div>
                 )}
@@ -1687,73 +1926,106 @@ export function GoalSettingTab({ userState, originalUserRole, onShowAI, simulati
                 Qualifies for: <span className="font-bold">QPB (Tiered 10-30% based on Team Quarterly FYC)</span>, DPI (20-30% based on rank: UM/SUM/AD), <span className="font-bold">Persistency Multiplier (80-110%)</span>
               </p>
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
-                {[1, 2, 3, 4].map((q) => {
-                  const value = q === 1 ? q1TeamFYC : q === 2 ? q2TeamFYC : q === 3 ? q3TeamFYC : q4TeamFYC;
-                  const setValue = q === 1 ? setQ1TeamFYC : q === 2 ? setQ2TeamFYC : q === 3 ? setQ3TeamFYC : setQ4TeamFYC;
-                  const currentTeamFYC = parseCommaNumber(value) || 0;
-                  
-                  // Base calculations before persistency multiplier
-                  const qpbRate = getQPBRate(currentTeamFYC);
-                  const baseQPB = currentTeamFYC * qpbRate;
-                  const baseDPI = currentTeamFYC * 0.20; // Using UM tenured rate
-                  
-                  // Apply Team Persistency Multiplier to (Base DPI + QPB Bonus)
+                {(() => {
+                  // Calculate team persistency multiplier once outside the map (reuse from top-level calculation)
                   const teamPersMultiplier = getPersistencyMultiplier(persistency);
-                  const totalDirectOverride = (baseDPI + baseQPB) * teamPersMultiplier;
-                  
-                  // Final amounts after multiplier
-                  const qpbAmount = baseQPB * teamPersMultiplier;
-                  const dpiAmount = baseDPI * teamPersMultiplier;
-                  const totalLeaderBonus = totalDirectOverride;
-                  
-                  return (
-                    <div key={q} className={`p-2.5 border-2 rounded-lg relative transition-all ${
-                      currentTeamFYC > 0 
-                        ? 'bg-white border-purple-300 shadow-sm' 
-                        : 'bg-white border-purple-200'
-                    }`}>
-                      <div className="flex items-center justify-between mb-1">
-                        <div className="text-[10px] sm:text-xs font-bold text-purple-900">Q{q} Team</div>
+                  return [1, 2, 3, 4].map((q) => {
+                    const value = q === 1 ? q1TeamFYC : q === 2 ? q2TeamFYC : q === 3 ? q3TeamFYC : q4TeamFYC;
+                    const setValue = q === 1 ? setQ1TeamFYC : q === 2 ? setQ2TeamFYC : q === 3 ? setQ3TeamFYC : setQ4TeamFYC;
+                    const currentTeamFYC = parseCommaNumber(value) || 0;
+                    
+                    // Base calculations before persistency multiplier
+                    const qpbRate = getQPBRate(currentTeamFYC);
+                    const baseQPB = currentTeamFYC * qpbRate;
+                    const baseDPI = currentTeamFYC * 0.20; // Using UM tenured rate
+                    
+                    // Apply Team Persistency Multiplier to (Base DPI + QPB Bonus)
+                    const totalDirectOverride = (baseDPI + baseQPB) * teamPersMultiplier;
+                    
+                    // Final amounts after multiplier
+                    const qpbAmount = baseQPB * teamPersMultiplier;
+                    const dpiAmount = baseDPI * teamPersMultiplier;
+                    const totalLeaderBonus = totalDirectOverride;
+                    
+                    return (
+                      <div key={q} className={`p-2.5 border-2 rounded-lg relative transition-all ${
+                        currentTeamFYC > 0 
+                          ? 'bg-white border-purple-300 shadow-sm' 
+                          : 'bg-white border-purple-200'
+                      }`}>
+                        <div className="flex items-center justify-between mb-1">
+                          <div className="text-[10px] sm:text-xs font-bold text-purple-900">Q{q} Team</div>
+                          {currentTeamFYC > 0 && (
+                            <div className="text-[9px] font-bold px-1 py-0.5 rounded bg-purple-200 text-purple-800">
+                              QPB+DPI
+                            </div>
+                          )}
+                        </div>
+                        <input
+                          type="text"
+                          value={formatNumberWithCommas(value)}
+                          onChange={(e) => handleNumberInputChange(e.target.value, setValue)}
+                          className="w-full p-2 border-2 border-slate-200 rounded-lg focus:border-purple-500 focus:ring-2 focus:ring-purple-500/20 transition-all shadow-sm text-xs sm:text-sm font-medium"
+                          placeholder="Team FYC"
+                        />
                         {currentTeamFYC > 0 && (
-                          <div className="text-[9px] font-bold px-1 py-0.5 rounded bg-purple-200 text-purple-800">
-                            QPB+DPI
+                          <div className="mt-1.5 space-y-0.5">
+                            <div className="text-[8px] text-purple-600 mb-1 font-medium">
+                              Base: DPI ₱{Math.round(baseDPI).toLocaleString()} + QPB ₱{Math.round(baseQPB).toLocaleString()}
+                            </div>
+                            <div className="flex items-center justify-between text-[9px] sm:text-[10px] text-purple-700 font-medium">
+                              <span>QPB ({Math.round(qpbRate * 100)}%):</span>
+                              <span className="font-bold">₱{Math.round(qpbAmount).toLocaleString()}</span>
+                            </div>
+                            <div className="flex items-center justify-between text-[9px] sm:text-[10px] text-purple-600 font-medium">
+                              <span>DPI (20%):</span>
+                              <span className="font-bold">₱{Math.round(dpiAmount).toLocaleString()}</span>
+                            </div>
+                            <div className="flex items-center justify-between text-[8px] text-purple-600 font-medium">
+                              <span>Persistency ({Math.round(teamPersMultiplier * 100)}%):</span>
+                              <span className="font-bold">
+                                {persistency >= 90 ? '⭐ 110%' : persistency >= 82.5 ? '✓ 100%' : persistency >= 75 ? '✓ 80%' : '⚠️ 0%'}
+                              </span>
+                            </div>
+                            <div className="text-[9px] sm:text-[10px] text-purple-800 font-bold border-t border-purple-200 pt-1 mt-1">
+                              Total Direct Override: ₱{Math.round(totalLeaderBonus).toLocaleString()}
+                            </div>
                           </div>
                         )}
                       </div>
-                      <input
-                        type="text"
-                        value={formatNumberWithCommas(value)}
-                        onChange={(e) => handleNumberInputChange(e.target.value, setValue)}
-                        className="w-full p-2 border-2 border-slate-200 rounded-lg focus:border-purple-500 focus:ring-2 focus:ring-purple-500/20 transition-all shadow-sm text-xs sm:text-sm font-medium"
-                        placeholder="Team FYC"
-                      />
-                      {currentTeamFYC > 0 && (
-                        <div className="mt-1.5 space-y-0.5">
-                          <div className="text-[8px] text-purple-600 mb-1 font-medium">
-                            Base: DPI ₱{Math.round(baseDPI).toLocaleString()} + QPB ₱{Math.round(baseQPB).toLocaleString()}
-                          </div>
-                          <div className="flex items-center justify-between text-[9px] sm:text-[10px] text-purple-700 font-medium">
-                            <span>QPB ({Math.round(qpbRate * 100)}%):</span>
-                            <span className="font-bold">₱{Math.round(qpbAmount).toLocaleString()}</span>
-                          </div>
-                          <div className="flex items-center justify-between text-[9px] sm:text-[10px] text-purple-600 font-medium">
-                            <span>DPI (20%):</span>
-                            <span className="font-bold">₱{Math.round(dpiAmount).toLocaleString()}</span>
-                          </div>
-                          <div className="flex items-center justify-between text-[8px] text-purple-600 font-medium">
-                            <span>Persistency ({Math.round(teamPersMultiplier * 100)}%):</span>
-                            <span className="font-bold">
-                              {persistency >= 90 ? '⭐ 110%' : persistency >= 82.5 ? '✓ 100%' : persistency >= 75 ? '✓ 80%' : '⚠️ 0%'}
-                            </span>
-                          </div>
-                          <div className="text-[9px] sm:text-[10px] text-purple-800 font-bold border-t border-purple-200 pt-1 mt-1">
-                            Total Direct Override: ₱{Math.round(totalLeaderBonus).toLocaleString()}
-                          </div>
-                        </div>
-                      )}
+                    );
+                  });
+                })()}
+              </div>
+              
+              {/* Team Persistency Section */}
+              <div className="mt-3 pt-3 border-t border-purple-300">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <label className="text-xs font-bold text-purple-900 mb-1 block">Team 2 Year Persistency (%)</label>
+                    <p className="text-[10px] text-purple-700">
+                      Multiplier: 80% (75%+), 100% (82.5%+), 110% (90%+) - Applied to (DPI + QPB)
+                    </p>
+                  </div>
+                  <input
+                    type="number"
+                    value={persistency}
+                    onChange={(e) => setPersistency(parseFloat(e.target.value) || 0)}
+                    min="0"
+                    max="100"
+                    step="0.1"
+                    className="w-20 p-2 border-2 border-purple-200 rounded-lg focus:border-purple-500 focus:ring-2 focus:ring-purple-500/20 transition-all shadow-sm text-sm font-bold text-center"
+                  />
+                </div>
+                {persistency > 0 && (
+                  <div className="mt-2 p-2 bg-purple-100 rounded-lg">
+                    <div className="text-[10px] sm:text-xs text-purple-800 font-bold">
+                      Team Persistency Multiplier: {Math.round(getPersistencyMultiplier(persistency) * 100)}%
+                      {persistency >= 90 && <span className="text-green-700 ml-1">⭐ Max!</span>}
+                      {persistency >= 82.5 && persistency < 90 && <span className="text-blue-700 ml-1">✓</span>}
                     </div>
-                  );
-                })}
+                  </div>
+                )}
               </div>
               
               {/* Base Manpower and New Recruits Inputs for Leaders */}
@@ -1803,7 +2075,7 @@ export function GoalSettingTab({ userState, originalUserRole, onShowAI, simulati
               <div className="flex items-center gap-2 mb-3">
                 <span className="text-xl">📋</span>
                 <h4 className="text-sm sm:text-base font-bold text-blue-900">
-                  Case Count Per Quarter (For Case Count Bonus)
+                  Personal Case Count Per Quarter (For Case Count Bonus)
                 </h4>
               </div>
               <p className="text-[10px] sm:text-xs text-blue-700 mb-3 font-medium">
@@ -1818,7 +2090,7 @@ export function GoalSettingTab({ userState, originalUserRole, onShowAI, simulati
                   const qPersonalFYC = q === 1 ? (parseCommaNumber(q1PersonalFYC) || 0) :
                                      q === 2 ? (parseCommaNumber(q2PersonalFYC) || 0) :
                                      q === 3 ? (parseCommaNumber(q3PersonalFYC) || 0) : (parseCommaNumber(q4PersonalFYC) || 0);
-                  const persMultiplier = getPersistencyMultiplier(persistency);
+                  const persMultiplier = getPersonalPersistencyMultiplier(persistency);
                   const caseBonus = qPersonalFYC > 0 ? qPersonalFYC * caseBonusRate * persMultiplier : 0;
                   
                   return (
@@ -1866,11 +2138,11 @@ export function GoalSettingTab({ userState, originalUserRole, onShowAI, simulati
               <div className="mt-3 pt-3 border-t border-blue-300">
                 <div className="flex items-center justify-between">
                   <div>
-                    <label className="text-xs font-bold text-blue-900 mb-1 block">{isLeader ? '2-Year Team Persistency (%)' : '2-Year Persistency (%)'}</label>
+                    <label className="text-xs font-bold text-blue-900 mb-1 block">{isLeader ? 'Personal 2 Year Persistency (%)' : '2-Year Persistency (%)'}</label>
                     <p className="text-[10px] text-blue-700">
                       {isLeader 
-                        ? 'Multiplier: 80% (75%+), 100% (82.5%+), 110% (90%+) - Applied to (DPI + QPB)'
-                        : 'Multiplier: 80% (75%+), 100% (82.5%+), 110% (90%+)'}
+                        ? 'Multiplier: 80% (75%+), 100% (82.5%+) - Applied to Personal PPB and Case Count Bonus'
+                        : 'Multiplier: 80% (75%+), 100% (82.5%+)'}
                     </p>
                   </div>
                   <input
@@ -1886,9 +2158,9 @@ export function GoalSettingTab({ userState, originalUserRole, onShowAI, simulati
                 {persistency > 0 && (
                   <div className="mt-2 p-2 bg-blue-100 rounded-lg">
                     <div className="text-[10px] sm:text-xs text-blue-800 font-bold">
-                      {isLeader ? 'Team ' : ''}Persistency Multiplier: {Math.round(getPersistencyMultiplier(persistency) * 100)}%
-                      {persistency >= 90 && <span className="text-green-700 ml-1">⭐ Max!</span>}
-                      {persistency >= 82.5 && persistency < 90 && <span className="text-blue-700 ml-1">✓</span>}
+                      {isLeader ? 'Personal ' : ''}Persistency Multiplier: {Math.round(getPersonalPersistencyMultiplier(persistency) * 100)}%
+                      {persistency >= 82.5 && <span className="text-green-700 ml-1">⭐ Max!</span>}
+                      {persistency >= 75 && persistency < 82.5 && <span className="text-blue-700 ml-1">✓</span>}
                     </div>
                   </div>
                 )}
@@ -2029,17 +2301,31 @@ export function GoalSettingTab({ userState, originalUserRole, onShowAI, simulati
                   </p>
                 </div>
 
-                {/* Personal Bonuses */}
+                {/* Case Count Bonus */}
                 <div className="bg-gradient-to-br from-amber-50 to-yellow-50 rounded-lg p-3 sm:p-4 border-2 border-amber-200">
                   <div className="flex items-center justify-between mb-2">
-                    <span className="text-xs font-bold text-amber-700 uppercase">Personal Bonuses</span>
-                    <span className="text-lg">⭐</span>
+                    <span className="text-xs font-bold text-amber-700 uppercase">Case Count Bonus</span>
+                    <span className="text-lg">📊</span>
                   </div>
                   <p className="text-xl sm:text-2xl font-bold text-amber-900 break-all">
-                    ₱{Math.round(leaderPersonalBonuses).toLocaleString()}
+                    ₱{Math.round(leaderCaseCountBonus).toLocaleString()}
                   </p>
                   <p className="text-[10px] sm:text-xs text-amber-600 mt-1">
-                    PPB + Case Count + Self-Override
+                    Personal Production Bonus
+                  </p>
+                </div>
+
+                {/* PPB (Personal Production Bonus) */}
+                <div className="bg-gradient-to-br from-orange-50 to-amber-50 rounded-lg p-3 sm:p-4 border-2 border-orange-200">
+                  <div className="flex items-center justify-between mb-2">
+                    <span className="text-xs font-bold text-orange-700 uppercase">PPB</span>
+                    <span className="text-lg">⭐</span>
+                  </div>
+                  <p className="text-xl sm:text-2xl font-bold text-orange-900 break-all">
+                    ₱{Math.round(leaderPPB).toLocaleString()}
+                  </p>
+                  <p className="text-[10px] sm:text-xs text-orange-600 mt-1">
+                    Personal Production Bonus
                   </p>
                 </div>
 
@@ -2057,18 +2343,25 @@ export function GoalSettingTab({ userState, originalUserRole, onShowAI, simulati
                   </p>
                 </div>
 
-                {/* Leader Bonuses (QPB) */}
+                {/* Leader Bonuses (QPB + Self Override) */}
                 <div className="bg-gradient-to-br from-green-50 to-emerald-50 rounded-lg p-3 sm:p-4 border-2 border-green-200">
                   <div className="flex items-center justify-between mb-2">
                     <span className="text-xs font-bold text-green-700 uppercase">Leader Bonuses</span>
                     <span className="text-lg">🎯</span>
                   </div>
                   <p className="text-xl sm:text-2xl font-bold text-green-900 break-all">
-                    ₱{Math.round(leaderQPB).toLocaleString()}
+                    ₱{Math.round(leaderQPB + leaderSelfOverride).toLocaleString()}
                   </p>
-                  <p className="text-[10px] sm:text-xs text-green-600 mt-1">
-                    QPB (Quarterly Production Bonus)
-                  </p>
+                  <div className="mt-2 space-y-1">
+                    <div className="flex items-center justify-between text-[10px] sm:text-xs text-green-700">
+                      <span>QPB (with Persistency):</span>
+                      <span className="font-semibold">₱{Math.round(leaderQPB).toLocaleString()}</span>
+                    </div>
+                    <div className="flex items-center justify-between text-[10px] sm:text-xs text-green-700">
+                      <span>Self-Override:</span>
+                      <span className="font-semibold">₱{Math.round(leaderSelfOverride).toLocaleString()}</span>
+                    </div>
+                  </div>
                 </div>
               </div>
 

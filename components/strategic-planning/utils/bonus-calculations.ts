@@ -35,6 +35,14 @@ export function getPersistencyMultiplier(persistency: number): number {
   return 0; // Below 75% - no bonus
 }
 
+// ACS 3.0 Personal Persistency Multiplier (2-Yr Persistency)
+// For Personal PPB and Case Count Bonus - caps at 100% (no 110% bonus)
+export function getPersonalPersistencyMultiplier(persistency: number): number {
+  if (persistency >= 82.5) return 1.0; // 100% - Max for Personal Persistency
+  if (persistency >= 75) return 0.8; // 80%
+  return 0; // Below 75% - no bonus
+}
+
 // ACS 3.0 Self-Override Rates (based on Active New Recruits)
 export function getSelfOverrideRate(activeRecruits: number): number {
   if (activeRecruits >= 3) return 0.10;

@@ -52,6 +52,7 @@ export function StrategicPlanningApp({ initialTab, initialView }: StrategicPlann
     tenuredProd?: number;
     newCount?: number;
     newProd?: number;
+    activeRecruits?: number; // Add activeRecruits for Self Override calculation
     // Advisor simulation data
     fyc?: number;
     cases?: number;

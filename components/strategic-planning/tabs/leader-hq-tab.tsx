@@ -9,6 +9,7 @@ import {
   getDPIRate,
   getSelfOverrideRate,
   getPersistencyMultiplier,
+  getPersonalPersistencyMultiplier,
   getQPBRate,
 } from '../utils/bonus-calculations';
 import { saveUserData, loadUserData } from '../utils/local-storage-persistence';
@@ -114,14 +115,14 @@ export function LeaderHQTab({ userState, onGenerateRecruitmentAd, onPushToGoals 
     // Note: getFYCBonusRate expects QUARTERLY FYC, so we multiply monthly by 3
     const quarterlyFYC = pFYCNum * 3;
     const fycBonusRate = getFYCBonusRate(quarterlyFYC);
-    // Personal bonuses use personal persistency (same as persistency input for now)
-    const persMultiplierPersonal = getPersistencyMultiplier(persistency);
+    // Personal bonuses use personal persistency multiplier (caps at 100%)
+    const persMultiplierPersonal = getPersonalPersistencyMultiplier(persistency);
     const pBonus = pFYCNum * fycBonusRate * persMultiplierPersonal; // Apply persistency multiplier
     const pTotal = pFYCNum + pBonus;
 
-    // ACS 3.0 Self-Override (based on Active New Recruits) - WITH persistency multiplier
+    // ACS 3.0 Self-Override (based on Active New Recruits) - NO persistency multiplier
     const sOverrideRate = getSelfOverrideRate(aRec);
-    const sOverride = pFYCNum * sOverrideRate * persMultiplierPersonal; // Apply persistency multiplier
+    const sOverride = pFYCNum * sOverrideRate; // NO persistency multiplier
 
     // ACS 3.0 Direct Production Incentive (DPI) - Base rates by rank
     // Base DPI is paid monthly (FYC x DPI rate)
@@ -360,9 +361,10 @@ export function LeaderHQTab({ userState, onGenerateRecruitmentAd, onPushToGoals 
                       tenuredProd: tenuredProdNum || 0,
                       newCount: newCount || 0,
                       newProd: newProdNum || 0,
+                      activeRecruits: activeRecruits || 0, // Include activeRecruits for Self Override
                     };
                     
-                    console.log('Pushing to goals:', data);
+                    console.log('Leader HQ: Pushing to goals:', data);
                     onPushToGoals(data);
                   } catch (error) {
                     console.error('Error pushing to goals:', error);
