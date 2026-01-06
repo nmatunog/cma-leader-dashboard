@@ -405,7 +405,7 @@ export default function ReportsPage() {
 
     const headers = [
       'Name', 'Rank', 'Unit Manager', 'Agency', 'Submitted Date',
-      'Dec 2025 FYP', 'Dec 2025 FYC', 'Dec 2025 Cases',
+      'Jan 2026 FYP', 'Jan 2026 FYC', 'Jan 2026 Cases',
       'Q1 Base Manpower', 'Q1 New Recruits', 'Q1 FYP', 'Q1 FYC', 'Q1 Cases',
       'Q2 Base Manpower', 'Q2 New Recruits', 'Q2 FYP', 'Q2 FYC', 'Q2 Cases',
       'Q3 Base Manpower', 'Q3 New Recruits', 'Q3 FYP', 'Q3 FYC', 'Q3 Cases',
@@ -932,7 +932,7 @@ export default function ReportsPage() {
                     </div>
                   </div>
 
-                  <h4 className="font-bold text-lg mb-3">December 2025 Targets</h4>
+                  <h4 className="font-bold text-lg mb-3">January 2026 Targets</h4>
                   <div className="grid grid-cols-3 gap-4 mb-6">
                     <div className="bg-blue-50 p-3 rounded">
                       <p className="text-sm text-blue-700">FYP</p>

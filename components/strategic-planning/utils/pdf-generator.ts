@@ -50,17 +50,17 @@ export function generateStrategicPlanningPDF(data: PDFReportData): void {
   doc.text(`Submitted: ${goal.submittedAt.toLocaleDateString()}`, margin, yPos);
   yPos += 10;
   
-  // Dec 2025 Targets Section
+  // Jan 2026 Targets Section
   checkPageBreak(30);
   doc.setFontSize(14);
   doc.setFont('helvetica', 'bold');
-  doc.text('December 2025 Targets', margin, yPos);
+  doc.text('January 2026 Targets', margin, yPos);
   yPos += 8;
   
   doc.setFontSize(11);
   doc.setFont('helvetica', 'normal');
   
-  // Dec 2025 Targets Table
+  // Jan 2026 Targets Table
   const decColWidths = [60, 80];
   let xPos = margin;
   
