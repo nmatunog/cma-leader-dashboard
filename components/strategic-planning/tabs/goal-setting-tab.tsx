@@ -1070,6 +1070,21 @@ export function GoalSettingTab({ userState, originalUserRole, onShowAI, simulati
                       // Always calculate FYP from FYC using 25% rate (FYP = FYC / 0.25)
                       const fyp = newFYC / 0.25;
                       setMonthlyGoalFYP(formatNumberWithCommas(Math.round(fyp).toString()));
+                      
+                      // Sync quarterly goals: quarterly = monthly * 3
+                      const quarterlyFYC = Math.round(newFYC * 3);
+                      const quarterlyFYCFormatted = formatNumberWithCommas(quarterlyFYC.toString());
+                      if (isLeader) {
+                        setQ1PersonalFYC(quarterlyFYCFormatted);
+                        setQ2PersonalFYC(quarterlyFYCFormatted);
+                        setQ3PersonalFYC(quarterlyFYCFormatted);
+                        setQ4PersonalFYC(quarterlyFYCFormatted);
+                      } else {
+                        setQ1FYC(quarterlyFYCFormatted);
+                        setQ2FYC(quarterlyFYCFormatted);
+                        setQ3FYC(quarterlyFYCFormatted);
+                        setQ4FYC(quarterlyFYCFormatted);
+                      }
                   });
                 }}
                 className="w-full p-2.5 sm:p-3 border-2 border-[#D31145]/30 rounded-lg focus:border-[#D31145] focus:ring-2 focus:ring-[#D31145]/20 transition-all shadow-sm font-bold bg-white text-sm sm:text-base"
@@ -1097,6 +1112,21 @@ export function GoalSettingTab({ userState, originalUserRole, onShowAI, simulati
                     // Always calculate FYC from FYP using 25% rate (FYC = FYP * 0.25)
                     const fyc = newFYP * 0.25;
                     setMonthlyGoalFYC(formatNumberWithCommas(Math.round(fyc).toString()));
+                    
+                    // Sync quarterly goals: quarterly = monthly * 3
+                    const quarterlyFYC = Math.round(fyc * 3);
+                    const quarterlyFYCFormatted = formatNumberWithCommas(quarterlyFYC.toString());
+                    if (isLeader) {
+                      setQ1PersonalFYC(quarterlyFYCFormatted);
+                      setQ2PersonalFYC(quarterlyFYCFormatted);
+                      setQ3PersonalFYC(quarterlyFYCFormatted);
+                      setQ4PersonalFYC(quarterlyFYCFormatted);
+                    } else {
+                      setQ1FYC(quarterlyFYCFormatted);
+                      setQ2FYC(quarterlyFYCFormatted);
+                      setQ3FYC(quarterlyFYCFormatted);
+                      setQ4FYC(quarterlyFYCFormatted);
+                    }
                   });
                 }}
                 className="w-full p-2.5 sm:p-3 border-2 border-[#D31145]/30 rounded-lg focus:border-[#D31145] focus:ring-2 focus:ring-[#D31145]/20 transition-all shadow-sm font-bold bg-white text-sm sm:text-base"
@@ -1215,6 +1245,21 @@ export function GoalSettingTab({ userState, originalUserRole, onShowAI, simulati
                       // Always calculate FYP from FYC using 25% rate (FYP = FYC / 0.25)
                       const fyp = newFYC / 0.25;
                       setMonthlyGoalFYP(formatNumberWithCommas(Math.round(fyp).toString()));
+                      
+                      // Sync quarterly goals: quarterly = monthly * 3
+                      const quarterlyFYC = Math.round(newFYC * 3);
+                      const quarterlyFYCFormatted = formatNumberWithCommas(quarterlyFYC.toString());
+                      if (isLeader) {
+                        setQ1PersonalFYC(quarterlyFYCFormatted);
+                        setQ2PersonalFYC(quarterlyFYCFormatted);
+                        setQ3PersonalFYC(quarterlyFYCFormatted);
+                        setQ4PersonalFYC(quarterlyFYCFormatted);
+                      } else {
+                        setQ1FYC(quarterlyFYCFormatted);
+                        setQ2FYC(quarterlyFYCFormatted);
+                        setQ3FYC(quarterlyFYCFormatted);
+                        setQ4FYC(quarterlyFYCFormatted);
+                      }
                     });
                   }}
                   className="w-full p-2.5 sm:p-3 border-2 border-[#D31145]/30 rounded-lg focus:border-[#D31145] focus:ring-2 focus:ring-[#D31145]/20 transition-all shadow-sm font-bold bg-white text-sm sm:text-base"
@@ -1242,6 +1287,21 @@ export function GoalSettingTab({ userState, originalUserRole, onShowAI, simulati
                       // Always calculate FYC from FYP using 25% rate (FYC = FYP * 0.25)
                       const fyc = newFYP * 0.25;
                       setMonthlyGoalFYC(formatNumberWithCommas(Math.round(fyc).toString()));
+                      
+                      // Sync quarterly goals: quarterly = monthly * 3
+                      const quarterlyFYC = Math.round(fyc * 3);
+                      const quarterlyFYCFormatted = formatNumberWithCommas(quarterlyFYC.toString());
+                      if (isLeader) {
+                        setQ1PersonalFYC(quarterlyFYCFormatted);
+                        setQ2PersonalFYC(quarterlyFYCFormatted);
+                        setQ3PersonalFYC(quarterlyFYCFormatted);
+                        setQ4PersonalFYC(quarterlyFYCFormatted);
+                      } else {
+                        setQ1FYC(quarterlyFYCFormatted);
+                        setQ2FYC(quarterlyFYCFormatted);
+                        setQ3FYC(quarterlyFYCFormatted);
+                        setQ4FYC(quarterlyFYCFormatted);
+                      }
                     });
                   }}
                   className="w-full p-2.5 sm:p-3 border-2 border-[#D31145]/30 rounded-lg focus:border-[#D31145] focus:ring-2 focus:ring-[#D31145]/20 transition-all shadow-sm font-bold bg-white text-sm sm:text-base"
