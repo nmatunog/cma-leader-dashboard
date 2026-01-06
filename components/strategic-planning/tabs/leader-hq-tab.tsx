@@ -346,18 +346,28 @@ export function LeaderHQTab({ userState, onGenerateRecruitmentAd, onPushToGoals 
             </div>
             {onPushToGoals && (
               <button
-                onClick={() => {
-                  const personalFYCNum = typeof personalFYC === 'string' ? parseCommaNumber(personalFYC) : personalFYC;
-                  const tenuredProdNum = typeof tenuredProd === 'string' ? parseCommaNumber(tenuredProd) : tenuredProd;
-                  const newProdNum = typeof newProd === 'string' ? parseCommaNumber(newProd) : newProd;
-                  
-                  onPushToGoals({
-                    personalFYC: personalFYCNum || 0,
-                    tenuredCount: tenuredCount || 0,
-                    tenuredProd: tenuredProdNum || 0,
-                    newCount: newCount || 0,
-                    newProd: newProdNum || 0,
-                  });
+                onClick={(e) => {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  try {
+                    const personalFYCNum = typeof personalFYC === 'string' ? parseCommaNumber(personalFYC) : (typeof personalFYC === 'number' ? personalFYC : 0);
+                    const tenuredProdNum = typeof tenuredProd === 'string' ? parseCommaNumber(tenuredProd) : (typeof tenuredProd === 'number' ? tenuredProd : 0);
+                    const newProdNum = typeof newProd === 'string' ? parseCommaNumber(newProd) : (typeof newProd === 'number' ? newProd : 0);
+                    
+                    const data = {
+                      personalFYC: personalFYCNum || 0,
+                      tenuredCount: tenuredCount || 0,
+                      tenuredProd: tenuredProdNum || 0,
+                      newCount: newCount || 0,
+                      newProd: newProdNum || 0,
+                    };
+                    
+                    console.log('Pushing to goals:', data);
+                    onPushToGoals(data);
+                  } catch (error) {
+                    console.error('Error pushing to goals:', error);
+                    alert('Error pushing data to Goal Setting. Please try again.');
+                  }
                 }}
                 className="w-full bg-gradient-to-r from-green-600 to-emerald-600 text-white font-bold py-3.5 rounded-xl hover:shadow-lg hover:scale-[1.02] transition-all shadow-md flex items-center justify-center gap-2 text-sm mb-3"
               >

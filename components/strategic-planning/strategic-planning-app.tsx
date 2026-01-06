@@ -326,8 +326,12 @@ export function StrategicPlanningApp({ initialTab, initialView }: StrategicPlann
         {activeTab === 'advisor' && (
           <AdvisorSimTab 
             onPushToGoals={(data) => {
+              console.log('onPushToGoals called with data (advisor):', data);
               setSimulationData(data);
-              setActiveTab('goals');
+              // Use setTimeout to ensure state updates are processed
+              setTimeout(() => {
+                setActiveTab('goals');
+              }, 0);
             }}
           />
         )}
@@ -336,8 +340,12 @@ export function StrategicPlanningApp({ initialTab, initialView }: StrategicPlann
             userState={userState} 
             onGenerateRecruitmentAd={handleActivityPlanning}
             onPushToGoals={(data) => {
+              console.log('onPushToGoals called with data (leader):', data);
               setSimulationData(data);
-              setActiveTab('goals');
+              // Use setTimeout to ensure state updates are processed
+              setTimeout(() => {
+                setActiveTab('goals');
+              }, 0);
             }}
           />
         )}
