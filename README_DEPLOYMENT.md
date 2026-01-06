@@ -304,3 +304,4 @@ For issues during deployment:
 6. Check Firebase console for database issues
 
 
+

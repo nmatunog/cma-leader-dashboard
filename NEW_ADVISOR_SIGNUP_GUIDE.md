@@ -81,3 +81,4 @@ For new advisors not in the hierarchy, **use Option 1 (Admin Creates User)**:
 
 This is the most straightforward and secure approach for onboarding new advisors.
 
+

@@ -118,3 +118,4 @@ Since you mentioned you "done the environment variables" earlier, they should al
 
 **Check your Vercel dashboard now to confirm all 6 variables are saved!**
 
+

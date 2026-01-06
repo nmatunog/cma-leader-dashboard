@@ -52,3 +52,4 @@ The network error usually means Firebase doesn't recognize your Vercel domain.
 
 **Most common issue: Vercel domain not in Firebase authorized domains list!**
 
+

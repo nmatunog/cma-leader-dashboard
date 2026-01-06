@@ -4,6 +4,7 @@ import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { Sidebar } from '@/components/sidebar';
 import { useAuth } from '@/contexts/auth-context';
+import { canAccessAdminPages } from '@/lib/permissions';
 import { convertWorksheetNameToDisplay, parseWorksheetName } from '@/lib/utils/name-formatter';
 import { getAgencies } from '@/services/agency-service';
 import { batchSaveHierarchyEntries, clearHierarchyForAgency, initializeHardcodedHierarchy } from '@/services/organizational-hierarchy-service';
@@ -94,9 +95,9 @@ export default function ImportPage() {
   const [showDeleteUserGoalsConfirm, setShowDeleteUserGoalsConfirm] = useState(false);
   const [deleteUserGoalsResult, setDeleteUserGoalsResult] = useState<{ success: boolean; deleted: number; error?: string } | null>(null);
 
-  // Check if user is admin - redirect if not
+  // Check if user is admin or superuser - redirect if not
   useEffect(() => {
-    if (!authLoading && (!currentUser || currentUser.role !== 'admin')) {
+    if (!authLoading && (!currentUser || !canAccessAdminPages(currentUser))) {
       router.push('/login');
     }
   }, [authLoading, currentUser, router]);
@@ -114,7 +115,7 @@ export default function ImportPage() {
         console.error('Error loading agencies:', error);
       }
     };
-    if (currentUser && currentUser.role === 'admin') {
+    if (currentUser && canAccessAdminPages(currentUser)) {
       loadAgencies();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -125,7 +126,7 @@ export default function ImportPage() {
     return null;
   }
 
-  if (!currentUser || currentUser.role !== 'admin') {
+  if (!canAccessAdminPages(currentUser)) {
     return null;
   }
 

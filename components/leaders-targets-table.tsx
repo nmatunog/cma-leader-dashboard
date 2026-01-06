@@ -134,7 +134,7 @@ export function LeadersTargetsTable() {
               <TableBody>
                 {leaders.map((leader) => (
                   <TableRow key={leader.id}>
-                    <TableCell className="font-medium">{leader.name}</TableCell>
+                    <TableCell className="font-medium">{formatDisplayName(leader.name)}</TableCell>
                     <TableCell>{leader.unit}</TableCell>
                     <TableCell>
                       {isEditMode ? (
@@ -201,7 +201,7 @@ export function LeadersTargetsTable() {
               <TableBody>
                 {leaders.map((leader) => (
                   <TableRow key={leader.id}>
-                    <TableCell className="font-medium">{leader.name}</TableCell>
+                    <TableCell className="font-medium">{formatDisplayName(leader.name)}</TableCell>
                     <TableCell>{leader.unit}</TableCell>
                     <TableCell>
                       {isEditMode ? (

@@ -25,3 +25,4 @@ I've wrapped the `useSearchParams()` usage in a Suspense boundary as required by
 
 **The fix is committed and pushed! Vercel should automatically deploy.**
 
+

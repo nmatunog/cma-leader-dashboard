@@ -73,7 +73,7 @@ export default function SetupPage() {
       try {
         const { getAllUsers } = await import('@/lib/user-service');
         const users = await getAllUsers();
-        adminExists = users.some(user => user.role === 'admin' && user.isActive);
+        adminExists = users.some(user => (user.role === 'admin' || user.role === 'superuser') && user.isActive);
         setHasAdmin(adminExists);
       } catch (fetchError) {
         // If getAllUsers fails (e.g., Firestore not initialized), allow setup to proceed

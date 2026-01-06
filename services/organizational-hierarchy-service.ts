@@ -194,6 +194,102 @@ export async function getPeopleInUnit(
 }
 
 /**
+ * Get all SUMs in an agency
+ */
+export async function getAllSUMsInAgency(agencyName: string): Promise<OrganizationalHierarchyEntry[]> {
+  try {
+    const entries = await getHierarchyByAgency(agencyName);
+    return entries.filter(entry => entry.rank === 'SUM');
+  } catch (error) {
+    console.error('Error getting SUMs in agency:', error);
+    return [];
+  }
+}
+
+/**
+ * Get all UMs (units) under a specific SUM
+ */
+export async function getUnitsUnderSUM(sumName: string, agencyName: string): Promise<string[]> {
+  try {
+    const entries = await getHierarchyByAgency(agencyName);
+    const units: string[] = [];
+    
+    // Get all UMs who directly report to this SUM (unitManager === sumName AND rank === 'UM')
+    const directUMs = entries.filter(
+      entry => entry.unitManager === sumName && entry.rank === 'UM'
+    );
+    
+    directUMs.forEach(um => units.push(um.name));
+    
+    return units.sort();
+  } catch (error) {
+    console.error('Error getting units under SUM:', error);
+    return [];
+  }
+}
+
+/**
+ * Get direct advisors under a SUM (advisors who report directly to SUM, not through UMs)
+ */
+export async function getDirectAdvisorsUnderSUM(sumName: string, agencyName: string): Promise<OrganizationalHierarchyEntry[]> {
+  try {
+    const entries = await getHierarchyByAgency(agencyName);
+    return entries.filter(
+      entry => entry.unitManager === sumName && 
+               entry.rank !== 'UM' && // Exclude UMs
+               (entry.rank === 'ADV' || entry.rank === 'AUM')
+    );
+  } catch (error) {
+    console.error('Error getting direct advisors under SUM:', error);
+    return [];
+  }
+}
+
+/**
+ * Get all subordinates recursively (for SUMs - gets all UMs, their teams, and direct advisors)
+ * Returns array of names of all subordinates
+ */
+export async function getAllSubordinatesRecursive(leaderName: string, agencyName: string): Promise<string[]> {
+  try {
+    const entries = await getHierarchyByAgency(agencyName);
+    const subordinates: string[] = [];
+    const visited = new Set<string>();
+    
+    function collectSubordinates(name: string) {
+      if (visited.has(name)) return;
+      visited.add(name);
+      
+      entries.forEach(entry => {
+        if (entry.unitManager === name) {
+          subordinates.push(entry.name);
+          // Recursively collect their subordinates
+          collectSubordinates(entry.name);
+        }
+      });
+    }
+    
+    collectSubordinates(leaderName);
+    return subordinates;
+  } catch (error) {
+    console.error('Error getting all subordinates recursively:', error);
+    return [];
+  }
+}
+
+/**
+ * Get direct subordinates of a leader (people who directly report to them)
+ */
+export async function getDirectSubordinates(leaderName: string, agencyName: string): Promise<OrganizationalHierarchyEntry[]> {
+  try {
+    const entries = await getHierarchyByAgency(agencyName);
+    return entries.filter(entry => entry.unitManager === leaderName);
+  } catch (error) {
+    console.error('Error getting direct subordinates:', error);
+    return [];
+  }
+}
+
+/**
  * Batch save multiple hierarchy entries
  */
 export async function batchSaveHierarchyEntries(

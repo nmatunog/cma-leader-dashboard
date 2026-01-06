@@ -4,6 +4,7 @@ import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { Sidebar } from '@/components/sidebar';
 import { useAuth } from '@/contexts/auth-context';
+import { canAccessAdminPages, isSuperuser } from '@/lib/permissions';
 import { registerUser } from '@/lib/auth-service';
 import { 
   getAllUsers, 
@@ -18,6 +19,7 @@ import { getAgencies, addAgency, removeAgency, type Agency } from '@/services/ag
 import { TempPasswordModal } from '@/components/admin/temp-password-modal';
 import { ViewTempPasswordModal } from '@/components/admin/view-temp-password-modal';
 import { EmergencyResetModal } from '@/components/admin/emergency-reset-modal';
+import { formatDisplayName } from '@/lib/utils/name-formatter';
 
 export default function AdminUsersPage() {
   const router = useRouter();
@@ -48,22 +50,40 @@ export default function AdminUsersPage() {
   const [emergencyResetUserId, setEmergencyResetUserId] = useState<string>('');
   const [emergencyResetUserName, setEmergencyResetUserName] = useState<string>('');
 
-  // Check if user is admin
+  // Check if user is admin or superuser
   useEffect(() => {
     if (!authLoading) {
-      if (!currentUser || currentUser.role !== 'admin') {
+      if (!currentUser) {
+        console.log('[AdminUsersPage] No current user, redirecting to login');
         router.push('/login');
+        return;
       }
+      if (!canAccessAdminPages(currentUser)) {
+        console.log('[AdminUsersPage] User does not have admin access:', {
+          role: currentUser.role,
+          isActive: currentUser.isActive,
+          name: currentUser.name,
+        });
+        router.push('/login');
+        return;
+      }
+      console.log('[AdminUsersPage] User has admin access, loading page');
     }
   }, [currentUser, authLoading, router]);
 
   // Load users and agencies
   useEffect(() => {
-    if (currentUser && currentUser.role === 'admin') {
+    if (!authLoading && currentUser && canAccessAdminPages(currentUser)) {
+      console.log('[AdminUsersPage] User authenticated, loading data...');
       loadUsers();
       loadAgencies();
+    } else if (!authLoading && currentUser) {
+      console.log('[AdminUsersPage] User not authorized:', {
+        role: currentUser.role,
+        isActive: currentUser.isActive,
+      });
     }
-  }, [currentUser]);
+  }, [currentUser, authLoading]);
 
   const loadAgencies = async () => {
     try {
@@ -80,11 +100,15 @@ export default function AdminUsersPage() {
     try {
       setLoading(true);
       setError(null);
+      console.log('[AdminUsersPage] Loading users...');
       const allUsers = await getAllUsers();
+      console.log('[AdminUsersPage] Users loaded:', allUsers.length);
       setUsers(allUsers);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to load users');
-      console.error('Error loading users:', err);
+      const errorMessage = err instanceof Error ? err.message : 'Failed to load users';
+      setError(errorMessage);
+      console.error('[AdminUsersPage] Error loading users:', err);
+      // Don't set loading to false on error so user can see the error state
     } finally {
       setLoading(false);
     }
@@ -115,7 +139,61 @@ export default function AdminUsersPage() {
   const handleUpdateUser = async (uid: string, updates: UserUpdateData) => {
     try {
       setActionLoading(`edit-${uid}`);
-      const result = await updateUser(uid, updates);
+      
+      const user = users.find(u => u.uid === uid);
+      if (!user) {
+        setActionLoading(null);
+        return { success: false, error: 'User not found' };
+      }
+      
+      // Check if trying to change role to admin or superuser - only superusers can do this
+      if ((updates.role === 'admin' || updates.role === 'superuser') && !isSuperuser(currentUser)) {
+        setActionLoading(null);
+        return { 
+          success: false, 
+          error: 'Only Super Users can assign Admin or Super User roles' 
+        };
+      }
+      
+      // Check if changing from advisor (ADV) to leader role - this is equivalent to promotion
+      if (user.role === 'advisor' && user.rank === 'ADV' && updates.role === 'leader') {
+        // Show confirmation dialog
+        const confirmed = confirm(
+          `Promote ${formatDisplayName(user.name)} from Advisor to Leader?\n\n` +
+          `This will:\n` +
+          `- Change role from 'advisor' to 'leader'\n` +
+          `- Promote rank from ADV to AUM (Associate Unit Manager)\n` +
+          `- Sync all data to organizational hierarchy\n\n` +
+          `This is equivalent to using the Promote function. Continue?`
+        );
+        
+        if (!confirmed) {
+          setActionLoading(null);
+          return { success: false, error: 'Update cancelled' };
+        }
+        
+        // Automatically set rank to AUM (first leader rank)
+        updates.rank = 'AUM';
+      }
+      
+      // Check if promoting AUM to UM - allow anytime
+      if (user.rank === 'AUM' && updates.rank === 'UM') {
+        // Show confirmation dialog
+        const confirmed = confirm(
+          `Promote ${formatDisplayName(user.name)} from AUM to UM?\n\n` +
+          `This will:\n` +
+          `- Promote rank from AUM (Associate Unit Manager) to UM (Unit Manager)\n` +
+          `- Sync all data to organizational hierarchy\n\n` +
+          `Continue?`
+        );
+        
+        if (!confirmed) {
+          setActionLoading(null);
+          return { success: false, error: 'Update cancelled' };
+        }
+      }
+      
+      const result = await updateUser(uid, updates, currentUser?.uid);
       if (result.success) {
         setShowEditModal(false);
         setEditingUser(null);
@@ -261,7 +339,7 @@ export default function AdminUsersPage() {
         await loadUsers();
         setShowPromoteModal(false);
         setPromotingUser(null);
-        alert(`Successfully promoted ${promotingUser.name} to ${result.newRank}`);
+        alert(`Successfully promoted ${formatDisplayName(promotingUser.name)} to ${result.newRank}`);
       } else {
         alert(result.error || 'Failed to promote user');
       }
@@ -317,15 +395,15 @@ export default function AdminUsersPage() {
   // Fallback to unique agencies from users if service fails
   const displayAgencies = agencies.length > 0 ? agencies : Array.from(new Set(users.map(u => u.agencyName))).sort();
 
-  if (authLoading || loading) {
+  if (authLoading) {
     return (
       <div className="flex h-full min-h-screen">
         <Sidebar />
-        <main className="flex-1 overflow-y-auto bg-gradient-to-br from-white via-blue-50/30 to-purple-50/20 p-4 sm:p-6 md:p-8">
+        <main className="flex-1 overflow-y-auto bg-slate-50 p-4 sm:p-6 md:p-8">
           <div className="mx-auto max-w-7xl">
             <div className="text-center py-12">
               <div className="inline-block animate-spin rounded-full h-12 w-12 border-b-2 border-[#D31145]"></div>
-              <p className="mt-4 text-slate-600">Loading...</p>
+              <p className="mt-4 text-slate-600">Checking authentication...</p>
             </div>
           </div>
         </main>
@@ -333,8 +411,24 @@ export default function AdminUsersPage() {
     );
   }
 
-  if (!currentUser || currentUser.role !== 'admin') {
-    return null;
+  if (!currentUser || !canAccessAdminPages(currentUser)) {
+    return (
+      <div className="flex h-full min-h-screen">
+        <Sidebar />
+        <main className="flex-1 overflow-y-auto bg-slate-50">
+          <div className="container mx-auto px-4 py-8 max-w-7xl">
+            <div className="text-center py-12">
+              <p className="text-red-600 font-semibold">Access Denied</p>
+              <p className="text-slate-600 mt-2">
+                {!currentUser 
+                  ? 'Please log in to access this page.' 
+                  : `You do not have admin privileges. Your role: ${currentUser.role}`}
+              </p>
+            </div>
+          </div>
+        </main>
+      </div>
+    );
   }
 
   return (
@@ -360,6 +454,35 @@ export default function AdminUsersPage() {
               >
                 + Create New User
               </button>
+              <button
+                onClick={async () => {
+                  if (confirm('Hardcode promote nmatunog@gmail.com to Super User?\n\nThis will bypass normal permission checks.')) {
+                    try {
+                      setActionLoading('hardcode-superuser');
+                      const response = await fetch('/api/admin/hardcode-superuser', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                      });
+                      const result = await response.json();
+                      if (result.success) {
+                        alert(result.message || 'Successfully promoted to Super User');
+                        await loadUsers();
+                      } else {
+                        alert(result.error || 'Failed to promote to Super User');
+                      }
+                    } catch (err) {
+                      alert(err instanceof Error ? err.message : 'Failed to promote to Super User');
+                    } finally {
+                      setActionLoading(null);
+                    }
+                  }
+                }}
+                disabled={actionLoading === 'hardcode-superuser'}
+                className="px-4 py-3 bg-gradient-to-r from-purple-600 to-purple-700 text-white font-bold rounded-lg hover:from-purple-700 hover:to-purple-800 transition-all shadow-md hover:shadow-lg disabled:opacity-50 disabled:cursor-not-allowed"
+                title="Hardcode promote nmatunog@gmail.com to Super User"
+              >
+                {actionLoading === 'hardcode-superuser' ? 'Promoting...' : '🔧 Hardcode Super User'}
+              </button>
             </div>
           </div>
 
@@ -384,6 +507,7 @@ export default function AdminUsersPage() {
                   className="w-full p-2 border-2 border-slate-200 rounded-lg focus:border-[#D31145] focus:ring-2 focus:ring-[#D31145]/20"
                 >
                   <option value="all">All Roles</option>
+                  <option value="superuser">Super User</option>
                   <option value="admin">Admin</option>
                   <option value="leader">Leader</option>
                   <option value="advisor">Advisor</option>
@@ -416,6 +540,15 @@ export default function AdminUsersPage() {
           {error && (
             <div className="bg-red-100 border-2 border-red-300 text-red-800 p-4 rounded-lg mb-6">
               <p className="font-semibold">Error: {error}</p>
+              {error.includes('permission') || error.includes('Permission') ? (
+                <p className="text-sm mt-2">
+                  <strong>Note:</strong> If you recently updated Firestore rules, make sure to deploy them to Firebase.
+                  <br />
+                  You can deploy rules using: <code className="bg-red-200 px-1 rounded">firebase deploy --only firestore:rules</code>
+                  <br />
+                  Or manually update them in the Firebase Console → Firestore Database → Rules
+                </p>
+              ) : null}
             </div>
           )}
 
@@ -448,20 +581,21 @@ export default function AdminUsersPage() {
                   ) : (
                     filteredUsers.map((user) => (
                       <tr key={user.uid} className="border-b border-slate-100 hover:bg-slate-50">
-                        <td className="p-4 font-medium">{user.name}</td>
+                        <td className="p-4 font-medium">{formatDisplayName(user.name)}</td>
                         <td className="p-4">{user.email}</td>
                         <td className="p-4">
                           <span className={`px-2 py-1 rounded text-xs font-semibold ${
+                            user.role === 'superuser' ? 'bg-gradient-to-r from-purple-500 to-pink-500 text-white' :
                             user.role === 'admin' ? 'bg-purple-100 text-purple-800' :
                             user.role === 'leader' ? 'bg-blue-100 text-blue-800' :
                             'bg-green-100 text-green-800'
                           }`}>
-                            {user.role.toUpperCase()}
+                            {user.role === 'superuser' ? '⭐ SUPER USER' : user.role.toUpperCase()}
                           </span>
                         </td>
                         <td className="p-4">{user.rank}</td>
                         <td className="p-4">{user.agencyName}</td>
-                        <td className="p-4">{user.unitManager || '-'}</td>
+                        <td className="p-4">{formatDisplayName(user.unitManager) || '-'}</td>
                         <td className="p-4">
                           <div className="flex flex-col gap-1">
                             {user.isActive ? (
@@ -601,6 +735,7 @@ export default function AdminUsersPage() {
               onClose={() => setShowCreateModal(false)}
               onSubmit={handleCreateUser}
               loading={actionLoading === 'create'}
+              isSuperuser={isSuperuser(currentUser)}
             />
           )}
 
@@ -708,11 +843,13 @@ function UserCreateModal({
   onClose,
   onSubmit,
   loading,
+  isSuperuser = false,
 }: {
   agencies: string[];
   onClose: () => void;
   onSubmit: (data: UserCreateData) => Promise<{ success: boolean; error?: string }>;
   loading: boolean;
+  isSuperuser?: boolean;
 }) {
   const [formData, setFormData] = useState<UserCreateData>({
     email: '',
@@ -743,7 +880,7 @@ function UserCreateModal({
 
     // Adjust rank based on role
     let finalRank: UserRank = formData.rank;
-    if (formData.role === 'admin') {
+    if (formData.role === 'admin' || formData.role === 'superuser') {
       finalRank = 'ADMIN';
     }
 
@@ -842,7 +979,7 @@ function UserCreateModal({
                   setFormData({
                     ...formData,
                     role,
-                    rank: role === 'admin' ? 'ADMIN' : role === 'leader' ? 'UM' : 'ADV',
+                    rank: (role === 'admin' || role === 'superuser') ? 'ADMIN' : role === 'leader' ? 'UM' : 'ADV',
                   });
                 }}
                 className="w-full p-2 border-2 border-slate-200 rounded-lg focus:border-[#D31145] focus:ring-2 focus:ring-[#D31145]/20"
@@ -850,7 +987,12 @@ function UserCreateModal({
               >
                 <option value="advisor">Advisor</option>
                 <option value="leader">Leader</option>
-                <option value="admin">Admin</option>
+                {isSuperuser && (
+                  <>
+                    <option value="admin">Admin</option>
+                    <option value="superuser">Super User</option>
+                  </>
+                )}
               </select>
             </div>
 
@@ -859,11 +1001,11 @@ function UserCreateModal({
               <select
                 value={formData.rank}
                 onChange={(e) => setFormData({ ...formData, rank: e.target.value as UserRank })}
-                disabled={formData.role === 'admin'}
+                disabled={formData.role === 'admin' || formData.role === 'superuser'}
                 className="w-full p-2 border-2 border-slate-200 rounded-lg focus:border-[#D31145] focus:ring-2 focus:ring-[#D31145]/20 disabled:bg-slate-100"
                 required
               >
-                {formData.role === 'admin' ? (
+                {(formData.role === 'admin' || formData.role === 'superuser') ? (
                   <option value="ADMIN">ADMIN</option>
                 ) : formData.role === 'leader' ? (
                   <>
@@ -895,13 +1037,27 @@ function UserCreateModal({
 
             <div>
               <label className="block text-sm font-semibold text-slate-700 mb-2">Unit Manager</label>
-              <input
-                type="text"
-                value={formData.unitManager}
-                onChange={(e) => setFormData({ ...formData, unitManager: e.target.value })}
-                className="w-full p-2 border-2 border-slate-200 rounded-lg focus:border-[#D31145] focus:ring-2 focus:ring-[#D31145]/20"
-                placeholder="Optional"
-              />
+              {(formData.role === 'leader' && (formData.rank === 'UM' || formData.rank === 'SUM' || formData.rank === 'ADD')) ? (
+                <>
+                  <input
+                    type="text"
+                    value={formData.name}
+                    disabled
+                    className="w-full p-2 border-2 border-slate-200 rounded-lg bg-slate-100 text-slate-600"
+                  />
+                  <p className="text-xs text-blue-600 mt-1">
+                    ℹ️ {formData.rank === 'UM' ? 'Unit Managers' : formData.rank === 'SUM' ? 'Senior Unit Managers' : 'Agency/District Directors'} automatically manage their own units
+                  </p>
+                </>
+              ) : (
+                <input
+                  type="text"
+                  value={formData.unitManager}
+                  onChange={(e) => setFormData({ ...formData, unitManager: e.target.value })}
+                  className="w-full p-2 border-2 border-slate-200 rounded-lg focus:border-[#D31145] focus:ring-2 focus:ring-[#D31145]/20"
+                  placeholder={formData.role === 'leader' && formData.rank === 'AUM' ? 'Enter Unit Manager name' : 'Optional'}
+                />
+              )}
             </div>
           </div>
 
@@ -941,6 +1097,7 @@ function UserEditModal({
   onClose: () => void;
   onSubmit: (uid: string, data: UserUpdateData) => Promise<{ success: boolean; error?: string }>;
   loading: boolean;
+  isSuperuser?: boolean;
 }) {
   const [formData, setFormData] = useState<UserUpdateData>({
     name: user.name,
@@ -964,10 +1121,13 @@ function UserEditModal({
 
     // Adjust rank based on role
     let finalRank: UserRank | undefined = formData.rank;
-    if (formData.role === 'admin') {
+    if (formData.role === 'admin' || formData.role === 'superuser') {
       finalRank = 'ADMIN';
     } else if (formData.role === 'leader' && formData.rank === 'LA') {
       finalRank = 'UM';
+    } else if (formData.role === 'leader' && user.role === 'advisor' && user.rank === 'ADV') {
+      // When changing from advisor (ADV) to leader, promote to AUM
+      finalRank = 'AUM';
     }
 
     const result = await onSubmit(user.uid, {
@@ -986,7 +1146,7 @@ function UserEditModal({
     <div className="fixed inset-0 bg-black/50 flex items-center justify-center p-4 z-50" onClick={onClose}>
       <div className="bg-white rounded-lg shadow-xl max-w-2xl w-full max-h-[90vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
         <div className="sticky top-0 bg-[#D31145] text-white p-4 flex justify-between items-center">
-          <h3 className="text-xl font-bold">Edit User - {user.name}</h3>
+          <h3 className="text-xl font-bold">Edit User - {formatDisplayName(user.name)}</h3>
           <button onClick={onClose} className="text-white hover:text-gray-200 text-2xl">×</button>
         </div>
         <form onSubmit={handleSubmit} className="p-6">
@@ -1018,10 +1178,31 @@ function UserEditModal({
                 value={formData.role}
                 onChange={(e) => {
                   const role = e.target.value as UserRole;
+                  // When changing from advisor to leader, set rank to AUM (promotion)
+                  // When changing to admin, set rank to ADMIN
+                  // Otherwise, keep current rank or set default
+                  let newRank: UserRank = formData.rank;
+                  if (role === 'admin' || role === 'superuser') {
+                    newRank = 'ADMIN';
+                  } else if (role === 'leader') {
+                    // If currently an advisor (ADV), promote to AUM
+                    if (user.role === 'advisor' && user.rank === 'ADV') {
+                      newRank = 'AUM';
+                    } else if (formData.rank === 'ADV') {
+                      newRank = 'AUM';
+                    } else {
+                      // Keep current rank if it's already a leader rank, or default to UM
+                      newRank = (['ADD', 'SUM', 'UM', 'AUM'].includes(formData.rank)) ? formData.rank : 'UM';
+                    }
+                  } else {
+                    // Advisor role
+                    newRank = 'ADV';
+                  }
+                  
                   setFormData({
                     ...formData,
                     role,
-                    rank: role === 'admin' ? 'ADMIN' : role === 'leader' ? 'UM' : 'ADV',
+                    rank: newRank,
                   });
                 }}
                 className="w-full p-2 border-2 border-slate-200 rounded-lg focus:border-[#D31145] focus:ring-2 focus:ring-[#D31145]/20"
@@ -1029,8 +1210,18 @@ function UserEditModal({
               >
                 <option value="advisor">Advisor</option>
                 <option value="leader">Leader</option>
-                <option value="admin">Admin</option>
+                {isSuperuser && (
+                  <>
+                    <option value="admin">Admin</option>
+                    <option value="superuser">Super User</option>
+                  </>
+                )}
               </select>
+              {user.role === 'advisor' && user.rank === 'ADV' && formData.role === 'leader' && (
+                <p className="text-xs text-blue-600 mt-1">
+                  ℹ️ Changing to Leader will automatically promote to AUM (Associate Unit Manager)
+                </p>
+              )}
             </div>
 
             <div>
@@ -1038,11 +1229,11 @@ function UserEditModal({
               <select
                 value={formData.rank}
                 onChange={(e) => setFormData({ ...formData, rank: e.target.value as UserRank })}
-                disabled={formData.role === 'admin'}
+                disabled={formData.role === 'admin' || formData.role === 'superuser'}
                 className="w-full p-2 border-2 border-slate-200 rounded-lg focus:border-[#D31145] focus:ring-2 focus:ring-[#D31145]/20 disabled:bg-slate-100"
                 required
               >
-                {formData.role === 'admin' ? (
+                {(formData.role === 'admin' || formData.role === 'superuser') ? (
                   <option value="ADMIN">ADMIN</option>
                 ) : formData.role === 'leader' ? (
                   <>
@@ -1055,6 +1246,11 @@ function UserEditModal({
                   <option value="ADV">Advisor</option>
                 )}
               </select>
+              {user.rank === 'AUM' && formData.rank === 'UM' && (
+                <p className="text-xs text-blue-600 mt-1">
+                  ℹ️ Promoting AUM to UM will sync all data to organizational hierarchy
+                </p>
+              )}
             </div>
 
             <div>
@@ -1074,13 +1270,27 @@ function UserEditModal({
 
             <div>
               <label className="block text-sm font-semibold text-slate-700 mb-2">Unit Manager</label>
-              <input
-                type="text"
-                value={formData.unitManager}
-                onChange={(e) => setFormData({ ...formData, unitManager: e.target.value })}
-                className="w-full p-2 border-2 border-slate-200 rounded-lg focus:border-[#D31145] focus:ring-2 focus:ring-[#D31145]/20"
-                placeholder="Optional"
-              />
+              {(formData.role === 'leader' && (formData.rank === 'UM' || formData.rank === 'SUM' || formData.rank === 'ADD')) ? (
+                <>
+                  <input
+                    type="text"
+                    value={formData.name}
+                    disabled
+                    className="w-full p-2 border-2 border-slate-200 rounded-lg bg-slate-100 text-slate-600"
+                  />
+                  <p className="text-xs text-blue-600 mt-1">
+                    ℹ️ {formData.rank === 'UM' ? 'Unit Managers' : formData.rank === 'SUM' ? 'Senior Unit Managers' : 'Agency/District Directors'} automatically manage their own units
+                  </p>
+                </>
+              ) : (
+                <input
+                  type="text"
+                  value={formData.unitManager}
+                  onChange={(e) => setFormData({ ...formData, unitManager: e.target.value })}
+                  className="w-full p-2 border-2 border-slate-200 rounded-lg focus:border-[#D31145] focus:ring-2 focus:ring-[#D31145]/20"
+                  placeholder={formData.role === 'leader' && formData.rank === 'AUM' ? 'Enter Unit Manager name' : 'Optional'}
+                />
+              )}
             </div>
 
             <div>
@@ -1151,7 +1361,7 @@ function PromoteUserModal({
         <form onSubmit={handleSubmit} className="p-6">
           <div className="mb-4">
             <p className="text-sm text-slate-600 mb-2">User:</p>
-            <p className="font-semibold text-lg text-slate-900">{user.name}</p>
+            <p className="font-semibold text-lg text-slate-900">{formatDisplayName(user.name)}</p>
             <p className="text-sm text-slate-500">{user.email}</p>
           </div>
 

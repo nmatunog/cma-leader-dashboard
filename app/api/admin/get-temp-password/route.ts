@@ -24,10 +24,10 @@ export async function POST(request: NextRequest) {
     const token = authHeader.substring(7);
     const decodedToken = await verifyIdToken(token);
     
-    // Verify user is admin
-    if (decodedToken.role !== 'admin' && decodedToken.rank !== 'ADMIN') {
+    // Verify user is admin or superuser
+    if (decodedToken.role !== 'admin' && decodedToken.role !== 'superuser' && decodedToken.rank !== 'ADMIN') {
       return NextResponse.json(
-        { success: false, error: 'Forbidden. Admin access required.' },
+        { success: false, error: 'Forbidden. Admin or Super User access required.' },
         { status: 403 }
       );
     }

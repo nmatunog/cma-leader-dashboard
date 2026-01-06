@@ -20,6 +20,8 @@ import {
 import { deleteUser as firebaseDeleteUser } from 'firebase/auth';
 import { auth, db } from './firebase';
 import type { User, UserUpdateData, UserRole, UserRank } from '@/types/user';
+import { isSuperuser } from '@/lib/permissions';
+import { saveHierarchyEntry } from '@/services/organizational-hierarchy-service';
 
 const USERS_COLLECTION = 'users';
 
@@ -79,6 +81,39 @@ export async function getUserById(uid: string): Promise<User | null> {
   } catch (error) {
     console.error('Error getting user by ID:', error);
     throw error;
+  }
+}
+
+/**
+ * Get user by code
+ */
+export async function getUserByCode(code: string): Promise<User | null> {
+  try {
+    if (!code || !code.trim()) {
+      return null;
+    }
+    
+    const q = query(
+      collection(db, USERS_COLLECTION),
+      where('code', '==', code.trim().toUpperCase())
+    );
+    
+    const querySnapshot = await getDocs(q);
+    
+    if (querySnapshot.empty) {
+      return null;
+    }
+    
+    // Should only be one user with this code
+    const docSnap = querySnapshot.docs[0];
+    const data = docSnap.data() as Omit<User, 'uid'>;
+    return {
+      uid: docSnap.id,
+      ...data,
+    };
+  } catch (error) {
+    console.error('Error getting user by code:', error);
+    return null;
   }
 }
 
@@ -171,11 +206,94 @@ export async function getUsersByUnitManager(unitManagerName: string, agencyName:
 }
 
 /**
- * Update user (Admin only, or user updating their own profile)
+ * Sync user to organizational hierarchy
+ * Automatically updates or creates hierarchy entry when user is created/updated/promoted
  */
-export async function updateUser(uid: string, updates: UserUpdateData): Promise<{ success: boolean; error?: string }> {
+async function syncUserToHierarchy(user: User): Promise<void> {
+  try {
+    // Skip admins and superusers
+    if (user.role === 'admin' || user.role === 'superuser') {
+      return;
+    }
+
+    // Auto-assign unitManager for leaders (except AUMs):
+    // - UMs, SUMs, and ADDs should have themselves as unitManager
+    // - AUMs keep their actual unitManager
+    let finalUnitManager = user.unitManager;
+    if (user.role === 'leader' && user.rank !== 'AUM') {
+      if (user.rank === 'UM' || user.rank === 'SUM' || user.rank === 'ADD') {
+        finalUnitManager = user.name; // Leaders manage their own units
+      }
+    }
+
+    // Sync to hierarchy
+    await saveHierarchyEntry({
+      name: user.name,
+      displayName: user.name,
+      rank: user.rank,
+      agencyName: user.agencyName,
+      unitManager: finalUnitManager,
+      code: user.code,
+    });
+  } catch (error) {
+    // Log error but don't fail the user operation
+    console.error('Error syncing user to hierarchy:', error);
+  }
+}
+
+/**
+ * Update user (Admin only, or user updating their own profile)
+ * Note: Only superusers can change roles to admin or superuser
+ */
+export async function updateUser(uid: string, updates: UserUpdateData, updatedBy?: string): Promise<{ success: boolean; error?: string }> {
   try {
     const userDocRef = doc(db, USERS_COLLECTION, uid);
+    
+    // Get current user data to merge with updates
+    const currentUser = await getUserById(uid);
+    if (!currentUser) {
+      return { success: false, error: 'User not found' };
+    }
+    
+    // Check if trying to change role to admin or superuser - only superusers can do this
+    if (updates.role === 'admin' || updates.role === 'superuser') {
+      if (updatedBy) {
+        const updater = await getUserById(updatedBy);
+        if (!updater || !isSuperuser(updater)) {
+          return {
+            success: false,
+            error: 'Only Super Users can assign Admin or Super User roles',
+          };
+        }
+      } else {
+        // If no updatedBy provided, check if current user is superuser
+        // This is a fallback - ideally updatedBy should always be provided
+        return {
+          success: false,
+          error: 'Only Super Users can assign Admin or Super User roles',
+        };
+      }
+    }
+    
+    // Auto-assign unitManager for leaders (except AUMs):
+    // - UMs, SUMs, and ADDs should have themselves as unitManager
+    // - AUMs keep their actual unitManager
+    if (updates.rank) {
+      const newRank = updates.rank;
+      const newRole = updates.role || currentUser.role;
+      
+      // If becoming a leader with rank UM, SUM, or ADD, set unitManager to self
+      if (newRole === 'leader' && (newRank === 'UM' || newRank === 'SUM' || newRank === 'ADD')) {
+        updates.unitManager = currentUser.name;
+      }
+      // If becoming AUM, keep existing unitManager or don't override if provided
+      // (AUMs should have their actual unit manager, not themselves)
+    } else if (updates.role === 'leader' && currentUser.rank !== 'AUM') {
+      // If changing role to leader (but rank not specified), check current rank
+      if (currentUser.rank === 'UM' || currentUser.rank === 'SUM' || currentUser.rank === 'ADD') {
+        updates.unitManager = currentUser.name;
+      }
+    }
     
     const updateData: Partial<User> = {
       ...updates,
@@ -183,6 +301,14 @@ export async function updateUser(uid: string, updates: UserUpdateData): Promise<
     };
     
     await updateDoc(userDocRef, updateData);
+    
+    // Sync to hierarchy after update
+    const updatedUser: User = {
+      ...currentUser,
+      ...updates,
+      updatedAt: new Date(),
+    };
+    await syncUserToHierarchy(updatedUser);
     
     return { success: true };
   } catch (error) {
@@ -233,18 +359,15 @@ export async function promoteUser(uid: string): Promise<{ success: boolean; erro
     }
 
     // Handle unitManager updates based on promotion:
-    // - AUM → UM: AUM keeps their unitManager (they remain in the unit)
-    // - UM → SUM: UM's unitManager becomes the SUM (or they report to ADD if no SUM exists)
-    // - SUM → ADD: SUM's unitManager is removed (they're at top level)
-    if (user.rank === 'UM' && nextRank === 'SUM') {
-      // When UM is promoted to SUM, they no longer need a unitManager (they report to ADD)
-      updates.unitManager = undefined;
-    } else if (user.rank === 'SUM' && nextRank === 'ADD') {
-      // When SUM is promoted to ADD, remove unitManager (top level)
-      updates.unitManager = undefined;
+    // - AUM → UM: UM should have themselves as unitManager (they manage their own unit)
+    // - UM → SUM: SUM should have themselves as unitManager (they manage their own unit)
+    // - SUM → ADD: ADD should have themselves as unitManager (they manage their own unit)
+    // All leaders (except AUMs) default to themselves as unitManager
+    if (nextRank === 'UM' || nextRank === 'SUM' || nextRank === 'ADD') {
+      // Leaders manage their own units
+      updates.unitManager = user.name;
     }
-    // AUM keeps unitManager - no change needed
-    // UM → SUM: unitManager removed (handled above)
+    // AUM keeps their actual unitManager - no change needed
 
     // Update the promoted user
     const userDocRef = doc(db, USERS_COLLECTION, uid);
@@ -271,6 +394,16 @@ export async function promoteUser(uid: string): Promise<{ success: boolean; erro
     }
 
     await batch.commit();
+
+    // Sync to hierarchy after promotion
+    const promotedUser: User = {
+      ...user,
+      rank: nextRank,
+      role: updates.role || user.role,
+      unitManager: updates.unitManager !== undefined ? updates.unitManager : user.unitManager,
+      updatedAt: new Date(),
+    };
+    await syncUserToHierarchy(promotedUser);
 
     return { success: true, newRank: nextRank };
   } catch (error) {
@@ -376,11 +509,11 @@ export async function isCurrentUserAdmin(): Promise<boolean> {
  */
 export function getUserPermissions(role: UserRole) {
   return {
-    canManageUsers: role === 'admin',
-    canViewReports: role === 'admin',
-    canAccessLeaderTabs: role === 'leader' || role === 'admin',
-    canToggleLeaderView: role === 'leader' || role === 'admin',
-    canEditAllGoals: role === 'admin',
-    canViewAllAgencies: role === 'admin',
+    canManageUsers: role === 'admin' || role === 'superuser',
+    canViewReports: role === 'admin' || role === 'superuser',
+    canAccessLeaderTabs: role === 'leader' || role === 'admin' || role === 'superuser',
+    canToggleLeaderView: role === 'leader' || role === 'admin' || role === 'superuser',
+    canEditAllGoals: role === 'admin' || role === 'superuser',
+    canViewAllAgencies: role === 'admin' || role === 'superuser',
   };
 }

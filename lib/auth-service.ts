@@ -15,6 +15,8 @@ import {
 import { doc, setDoc, getDoc, updateDoc, serverTimestamp, Timestamp } from 'firebase/firestore';
 import { auth, db } from './firebase';
 import type { User, UserCreateData, UserUpdateData, UserRole, UserRank } from '@/types/user';
+import { getUserByCode, getUserById } from './user-service';
+import { saveHierarchyEntry } from '@/services/organizational-hierarchy-service';
 
 const USERS_COLLECTION = 'users';
 
@@ -24,6 +26,17 @@ const USERS_COLLECTION = 'users';
  */
 export async function registerUser(userData: UserCreateData, createdBy: string): Promise<{ success: boolean; user?: User; error?: string }> {
   try {
+    // Check if trying to create admin or superuser - only superusers can do this
+    if (userData.role === 'admin' || userData.role === 'superuser') {
+      const creator = await getUserById(createdBy);
+      if (!creator || creator.role !== 'superuser') {
+        return {
+          success: false,
+          error: 'Only Super Users can create Admin or Super User accounts',
+        };
+      }
+    }
+    
     // Create Firebase Auth account
     const userCredential = await createUserWithEmailAndPassword(
       auth,
@@ -33,6 +46,16 @@ export async function registerUser(userData: UserCreateData, createdBy: string):
     
     const firebaseUser = userCredential.user;
     
+    // Auto-assign unitManager for leaders (except AUMs):
+    // - UMs, SUMs, and ADDs should have themselves as unitManager
+    // - AUMs keep their actual unitManager
+    let finalUnitManager = userData.unitManager;
+    if (userData.role === 'leader' && userData.rank !== 'AUM') {
+      if (userData.rank === 'UM' || userData.rank === 'SUM' || userData.rank === 'ADD') {
+        finalUnitManager = userData.name; // Leaders manage their own units
+      }
+    }
+    
     // Create user document in Firestore
     const userDoc: Omit<User, 'uid'> = {
       email: userData.email,
@@ -40,7 +63,7 @@ export async function registerUser(userData: UserCreateData, createdBy: string):
       name: userData.name,
       role: userData.role,
       rank: userData.rank,
-      unitManager: userData.unitManager,
+      unitManager: finalUnitManager,
       agencyName: userData.agencyName,
       createdAt: serverTimestamp() as Timestamp,
       updatedAt: serverTimestamp() as Timestamp,
@@ -64,6 +87,23 @@ export async function registerUser(userData: UserCreateData, createdBy: string):
       updatedAt: new Date(),
     };
     
+    // Sync to organizational hierarchy (skip admins)
+    if (userData.role !== 'admin') {
+      try {
+        await saveHierarchyEntry({
+          name: userData.name,
+          displayName: userData.name,
+          rank: userData.rank,
+          agencyName: userData.agencyName,
+          unitManager: userData.unitManager,
+          code: userData.code,
+        });
+      } catch (hierarchyError) {
+        // Log but don't fail user creation
+        console.error('Error syncing new user to hierarchy:', hierarchyError);
+      }
+    }
+    
     return { success: true, user: newUser };
   } catch (error) {
     console.error('Error registering user:', error);
@@ -75,10 +115,27 @@ export async function registerUser(userData: UserCreateData, createdBy: string):
 }
 
 /**
- * Login user with email and password
+ * Login user with email/username and password
+ * Supports both email and code-based login
  */
-export async function loginUser(email: string, password: string): Promise<{ success: boolean; user?: User; error?: string }> {
+export async function loginUser(emailOrCode: string, password: string): Promise<{ success: boolean; user?: User; error?: string }> {
   try {
+    let email = emailOrCode.trim();
+    
+    // If input doesn't look like an email (no @), treat it as a code
+    if (!email.includes('@')) {
+      // Look up user by code
+      const userByCode = await getUserByCode(email.toUpperCase());
+      if (!userByCode) {
+        return {
+          success: false,
+          error: 'No account found with this code. Please check your code or use your email address.',
+        };
+      }
+      // Use the user's email (which might be code-based like "abc123@cma.local")
+      email = userByCode.email;
+    }
+    
     // Sign in with Firebase Auth
     const userCredential = await signInWithEmailAndPassword(auth, email, password);
     const firebaseUser = userCredential.user;

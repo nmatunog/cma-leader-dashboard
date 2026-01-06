@@ -69,3 +69,4 @@ If you tried to create a new account using your code:
 
 **Most likely fix: Add `cma-leader-dashboard.vercel.app` to Firebase Authorized Domains!**
 
+

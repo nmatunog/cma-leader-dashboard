@@ -42,3 +42,4 @@ The file `firestore.rules` in your project now has the correct rules. Just copy 
 
 After updating the rules, refresh your browser and the permission errors should be resolved!
 
+

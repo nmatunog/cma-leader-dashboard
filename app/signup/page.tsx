@@ -5,10 +5,15 @@ import { useRouter } from 'next/navigation';
 import { Sidebar } from '@/components/sidebar';
 import { useAuth } from '@/contexts/auth-context';
 import { getAgencies } from '@/services/agency-service';
-import { getUnitsByAgency, getHierarchyByAgency } from '@/services/organizational-hierarchy-service';
+import { getHierarchyByAgency } from '@/services/organizational-hierarchy-service';
 import { registerUser } from '@/lib/auth-service';
 import type { OrganizationalHierarchyEntry } from '@/services/organizational-hierarchy-service';
 import { Eye, EyeOff } from 'lucide-react';
+import { AIChatbot } from '@/components/signup/ai-chatbot';
+import { ChatbotSignup } from '@/components/signup/chatbot-signup';
+import type { ChatContext } from '@/services/ai-chat-service';
+import { formatDisplayName } from '@/lib/utils/name-formatter';
+import type { CollectedSignupData } from '@/components/signup/signup-flow-state';
 
 export default function SignupPage() {
   const router = useRouter();
@@ -20,10 +25,13 @@ export default function SignupPage() {
     password: '',
     confirmPassword: '',
     agencyName: '',
-    unitName: '',
+    unitManager: '',
+    unitManagerOther: '', // For manual entry when "Others" is selected
+    role: 'advisor' as 'advisor' | 'leader',
+    rank: 'ADV' as 'ADMIN' | 'ADD' | 'SUM' | 'UM' | 'AUM' | 'ADV',
   });
   const [agencies, setAgencies] = useState<string[]>([]);
-  const [units, setUnits] = useState<string[]>([]);
+  const [unitManagers, setUnitManagers] = useState<string[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState(false);
@@ -37,6 +45,24 @@ export default function SignupPage() {
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
   const [nameSuggestions, setNameSuggestions] = useState<string[]>([]);
   const [showSuggestions, setShowSuggestions] = useState(false);
+  const [showUnitManagerOther, setShowUnitManagerOther] = useState(false);
+  const [showAgencyOther, setShowAgencyOther] = useState(false);
+  const [agencyOther, setAgencyOther] = useState('');
+  const [useChatbot, setUseChatbot] = useState(true); // Default to chatbot mode
+
+  // Build chat context for AI chatbot
+  const chatContext: ChatContext = {
+    currentFormState: {
+      code: formData.code,
+      name: formData.name,
+      email: formData.email,
+      agencyName: formData.agencyName,
+      unitName: formData.unitManager || formData.unitManagerOther,
+      hasHierarchyMatch: !!hierarchyInfo,
+    },
+    availableAgencies: agencies,
+    availableUnits: unitManagers,
+  };
 
   // Redirect if already logged in
   useEffect(() => {
@@ -58,25 +84,36 @@ export default function SignupPage() {
     loadAgencies();
   }, []);
 
-  // Load units when agency is selected
+  // Load unit managers when agency is selected
   useEffect(() => {
-    const loadUnits = async () => {
-      if (!formData.agencyName) {
-        setUnits([]);
+    const loadUnitManagers = async () => {
+      if (!formData.agencyName || formData.agencyName === 'Other' || formData.agencyName === 'No Agency') {
+        setUnitManagers([]);
         setHierarchyInfo(null);
         setAutoFilledData(null);
         return;
       }
 
       try {
-        const unitList = await getUnitsByAgency(formData.agencyName);
-        setUnits(unitList);
+        const entries = await getHierarchyByAgency(formData.agencyName);
+        // Get all unique unit managers (leaders) from the hierarchy
+        const managers = new Set<string>();
+        entries.forEach(entry => {
+          if (entry.unitManager) {
+            managers.add(entry.unitManager);
+          }
+          // Also include leaders themselves (UM, SUM, ADD) as potential unit managers
+          if (entry.rank === 'UM' || entry.rank === 'SUM' || entry.rank === 'ADD') {
+            managers.add(entry.name);
+          }
+        });
+        setUnitManagers(Array.from(managers).sort());
       } catch (error) {
-        console.error('Error loading units:', error);
-        setUnits([]);
+        console.error('Error loading unit managers:', error);
+        setUnitManagers([]);
       }
     };
-    loadUnits();
+    loadUnitManagers();
   }, [formData.agencyName]);
 
 
@@ -148,16 +185,15 @@ export default function SignupPage() {
           unitManager: entry.unitManager,
         });
 
-        // Auto-select unit logic:
+        // Auto-select unit manager logic:
         // 1. If they have a unitManager, select that
-        // 2. If they're an ADD/SUM/UM without a unitManager, select themselves
-        if (!formData.unitName) {
+        // 2. If they're an ADD/SUM/UM without a unitManager, they manage themselves
+        if (!formData.unitManager) {
           if (entry.unitManager) {
-            const unitManagerName: string = entry.unitManager;
-            setFormData(prev => ({ ...prev, unitName: unitManagerName }));
+            setFormData(prev => ({ ...prev, unitManager: entry.unitManager! }));
           } else if (entry.rank === 'ADD' || entry.rank === 'SUM' || entry.rank === 'UM') {
-            // ADDs, SUMs, and UMs can select themselves as unit
-            setFormData(prev => ({ ...prev, unitName: entry.name }));
+            // ADDs, SUMs, and UMs manage their own units
+            setFormData(prev => ({ ...prev, unitManager: entry.name }));
           }
         }
         setShowSuggestions(false); // Hide suggestions when exact match found
@@ -180,8 +216,24 @@ export default function SignupPage() {
     setSuccess(false);
 
     // Validation
-    if (!formData.code || !formData.name || !formData.password || !formData.agencyName || !formData.unitName) {
+    if (!formData.code || !formData.name || !formData.password || !formData.agencyName) {
       setError('Please fill in all required fields');
+      return;
+    }
+
+    // Validate agency
+    if (formData.agencyName === 'Other' && !agencyOther.trim()) {
+      setError('Please enter the agency name');
+      return;
+    }
+
+    // Validate unit manager
+    if (!formData.unitManager) {
+      setError('Please select or enter a unit manager');
+      return;
+    }
+    if (formData.unitManager === 'Others' && !formData.unitManagerOther.trim()) {
+      setError('Please enter the unit manager name');
       return;
     }
 
@@ -201,11 +253,7 @@ export default function SignupPage() {
       return;
     }
 
-    // Check if user exists in hierarchy
-    if (!hierarchyInfo || !autoFilledData) {
-      setError('Name not found in organizational hierarchy. Please contact your administrator.');
-      return;
-    }
+    // No longer require hierarchy match - allow manual entry
 
     setLoading(true);
 
@@ -213,17 +261,25 @@ export default function SignupPage() {
       // Use provided email, or generate from code if not provided
       const email = formData.email.trim() || `${formData.code.toLowerCase().replace(/[^a-z0-9]/g, '')}@cma.local`;
 
-      // Determine unitManager from selected unitName
-      // If user selected themselves as unit, they have no unitManager (undefined)
-      // Otherwise, the selected unitName is their unitManager
-      let unitManager: string | undefined;
-      if (formData.unitName === formData.name) {
-        // User selected themselves - they are the unit manager (no manager above them)
-        unitManager = undefined;
-      } else {
-        // User selected someone else - that person is their unit manager
-        unitManager = formData.unitName;
+      // Determine final agency name
+      let finalAgencyName = formData.agencyName;
+      if (formData.agencyName === 'Other') {
+        finalAgencyName = agencyOther.trim();
+      } else if (formData.agencyName === 'No Agency') {
+        finalAgencyName = 'No Agency';
       }
+
+      // Determine unitManager
+      let finalUnitManager: string | undefined;
+      if (formData.unitManager === 'Others') {
+        finalUnitManager = formData.unitManagerOther.trim();
+      } else if (formData.unitManager) {
+        finalUnitManager = formData.unitManager;
+      }
+
+      // Use auto-filled data if available, otherwise use form selections
+      const role = autoFilledData?.role || formData.role;
+      const rank = autoFilledData?.rank || formData.rank;
 
       // Register user
       const result = await registerUser({
@@ -231,10 +287,10 @@ export default function SignupPage() {
         code: formData.code,
         password: formData.password,
         name: formData.name,
-        role: autoFilledData.role as 'admin' | 'leader' | 'advisor',
-        rank: autoFilledData.rank as 'ADMIN' | 'ADD' | 'SUM' | 'UM' | 'AUM' | 'ADV',
-        unitManager: unitManager,
-        agencyName: formData.agencyName,
+        role: role as 'admin' | 'leader' | 'advisor',
+        rank: rank as 'ADMIN' | 'ADD' | 'SUM' | 'UM' | 'AUM' | 'ADV',
+        unitManager: finalUnitManager,
+        agencyName: finalAgencyName,
       }, 'self-signup');
 
       if (result.success) {
@@ -271,10 +327,23 @@ export default function SignupPage() {
       <main className="flex-1 overflow-y-auto bg-gradient-to-br from-white via-blue-50/30 to-purple-50/20 p-4 sm:p-6 md:p-8">
         <div className="mx-auto max-w-2xl">
           <div className="bg-white rounded-lg shadow-lg p-8">
-            <h1 className="text-3xl font-bold text-slate-900 mb-2">Create Account</h1>
-            <p className="text-slate-600 mb-6">
-              Sign up using your advisor/leader code and select your agency and unit from the organizational hierarchy.
-            </p>
+            <div className="mb-6">
+              <div className="flex items-center justify-between mb-2">
+                <h1 className="text-3xl font-bold text-slate-900">Create Account</h1>
+                <button
+                  onClick={() => setUseChatbot(!useChatbot)}
+                  className="px-3 py-1.5 text-xs text-slate-600 hover:text-slate-900 bg-slate-50 hover:bg-slate-100 rounded-md transition-colors border border-slate-200"
+                  title={useChatbot ? 'Switch to traditional form' : 'Switch to chatbot'}
+                >
+                  {useChatbot ? '📝 Use Form' : '💬 Use Chatbot'}
+                </button>
+              </div>
+              <p className="text-slate-600">
+                {useChatbot 
+                  ? '✨ Sign up using our interactive chatbot assistant - the fastest and easiest way to create your account!'
+                  : 'Sign up using your advisor/leader code. Enter your name, select your agency and unit manager.'}
+              </p>
+            </div>
 
             {error && (
               <div className="mb-4 p-4 bg-red-100 border border-red-300 text-red-800 rounded-lg">
@@ -288,27 +357,60 @@ export default function SignupPage() {
               </div>
             )}
 
-            {autoFilledData && (
-              <div className="mb-4 p-4 bg-blue-50 border border-blue-200 rounded-lg">
-                <p className="text-sm text-blue-800">
-                  <strong>Auto-detected:</strong> {autoFilledData.role?.toUpperCase()} ({autoFilledData.rank})
-                  {autoFilledData.unitManager && ` - Unit Manager: ${autoFilledData.unitManager}`}
-                </p>
+            {useChatbot ? (
+              <div className="mb-6">
+                <div className="mb-3 flex items-center gap-2 text-sm">
+                  <span className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-gradient-to-r from-blue-50 to-indigo-50 text-blue-700 rounded-lg border border-blue-200 font-medium">
+                    <span className="text-base">💬</span>
+                    <span>Chatbot Mode</span>
+                    <span className="text-xs bg-blue-100 text-blue-800 px-1.5 py-0.5 rounded">Recommended</span>
+                  </span>
+                </div>
+                <ChatbotSignup 
+                  onComplete={async (data: CollectedSignupData) => {
+                    // Account creation is handled within ChatbotSignup component
+                    // This callback is called after successful account creation
+                    setSuccess(true);
+                    setError(null);
+                    // Redirect is handled by ChatbotSignup component
+                  }}
+                  onCancel={() => setUseChatbot(false)}
+                />
               </div>
-            )}
-            
-            {formData.name && formData.agencyName && !hierarchyInfo && !autoFilledData && (
-              <div className="mb-4 p-4 bg-yellow-50 border border-yellow-200 rounded-lg">
-                <p className="text-sm text-yellow-800">
-                  <strong>⚠️ Name not found:</strong> "{formData.name}" was not found in the organizational hierarchy for "{formData.agencyName}".
-                </p>
-                <p className="text-xs text-yellow-700 mt-2">
-                  Please ensure the name matches exactly as it appears in the hierarchy. The "Create Account" button will be enabled once your name is found.
-                </p>
+            ) : (
+              <div className="mb-4">
+                <div className="mb-3 flex items-center gap-2 text-sm text-slate-600">
+                  <span className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-slate-100 text-slate-700 rounded-lg border border-slate-200">
+                    <span className="text-base">📝</span>
+                    <span>Traditional Form</span>
+                  </span>
+                </div>
               </div>
             )}
 
-            <form onSubmit={handleSubmit} className="space-y-4">
+            {!useChatbot && (
+              <>
+                {autoFilledData && (
+                  <div className="mb-4 p-4 bg-blue-50 border border-blue-200 rounded-lg">
+                    <p className="text-sm text-blue-800">
+                      <strong>Auto-detected:</strong> {autoFilledData.role?.toUpperCase()} ({autoFilledData.rank})
+                      {autoFilledData.unitManager && ` - Unit Manager: ${formatDisplayName(autoFilledData.unitManager)}`}
+                    </p>
+                  </div>
+                )}
+                
+                {formData.name && formData.agencyName && formData.agencyName !== 'Other' && formData.agencyName !== 'No Agency' && !hierarchyInfo && !autoFilledData && (
+                  <div className="mb-4 p-4 bg-blue-50 border border-blue-200 rounded-lg">
+                    <p className="text-sm text-blue-800">
+                      <strong>ℹ️ Name not found in hierarchy:</strong> "{formData.name}" was not found in the organizational hierarchy for "{formData.agencyName}".
+                    </p>
+                    <p className="text-xs text-blue-700 mt-2">
+                      You can still create your account. Please select your role and rank below.
+                    </p>
+                  </div>
+                )}
+
+                <form onSubmit={handleSubmit} className="space-y-4">
               <div>
                 <label className="block text-sm font-semibold text-slate-700 mb-2">
                   Advisor/Leader Code *
@@ -365,7 +467,7 @@ export default function SignupPage() {
                   </div>
                 )}
                 <p className="text-xs text-slate-500 mt-1">
-                  Your name must match the organizational hierarchy
+                  Enter your full name. If found in the hierarchy, your role and rank will be auto-filled.
                 </p>
               </div>
 
@@ -392,7 +494,9 @@ export default function SignupPage() {
                 <select
                   value={formData.agencyName}
                   onChange={(e) => {
-                    setFormData({ ...formData, agencyName: e.target.value, unitName: '', name: '' });
+                    const selectedAgency = e.target.value;
+                    setFormData({ ...formData, agencyName: selectedAgency, unitManager: '' });
+                    setShowAgencyOther(selectedAgency === 'Other');
                     setHierarchyInfo(null);
                     setAutoFilledData(null);
                     setNameSuggestions([]);
@@ -405,32 +509,66 @@ export default function SignupPage() {
                   {agencies.map(agency => (
                     <option key={agency} value={agency}>{agency}</option>
                   ))}
+                  <option value="Other">Other</option>
+                  <option value="No Agency">No Agency</option>
                 </select>
+                {showAgencyOther && (
+                  <input
+                    type="text"
+                    value={agencyOther}
+                    onChange={(e) => setAgencyOther(e.target.value)}
+                    className="w-full p-3 mt-2 border-2 border-slate-200 rounded-lg focus:border-[#D31145] focus:ring-2 focus:ring-[#D31145]/20"
+                    placeholder="Enter agency name"
+                    required={formData.agencyName === 'Other'}
+                  />
+                )}
               </div>
 
               <div>
                 <label className="block text-sm font-semibold text-slate-700 mb-2">
-                  Unit *
+                  Unit Manager *
                 </label>
                 <select
-                  value={formData.unitName}
+                  value={formData.unitManager}
                   onChange={(e) => {
-                    setFormData({ ...formData, unitName: e.target.value });
-                    // Don't clear hierarchy info on unit change - user might be adjusting
+                    const selectedManager = e.target.value;
+                    setFormData({ ...formData, unitManager: selectedManager });
+                    setShowUnitManagerOther(selectedManager === 'Others');
                   }}
                   className="w-full p-3 border-2 border-slate-200 rounded-lg focus:border-[#D31145] focus:ring-2 focus:ring-[#D31145]/20"
                   required
-                  disabled={!formData.agencyName || units.length === 0}
+                  disabled={!formData.agencyName || formData.agencyName === 'Other' || formData.agencyName === 'No Agency'}
                 >
-                  <option value="">-- Select Unit --</option>
-                  {units.map(unit => (
-                    <option key={unit} value={unit}>{unit}</option>
+                  <option value="">-- Select Unit Manager --</option>
+                  {unitManagers.map(manager => (
+                    <option key={manager} value={manager}>{formatDisplayName(manager)}</option>
                   ))}
+                  <option value="Others">Others (Enter manually)</option>
                 </select>
-                {formData.agencyName && units.length === 0 && (
+                {showUnitManagerOther && (
+                  <input
+                    type="text"
+                    value={formData.unitManagerOther}
+                    onChange={(e) => setFormData({ ...formData, unitManagerOther: e.target.value })}
+                    className="w-full p-3 mt-2 border-2 border-slate-200 rounded-lg focus:border-[#D31145] focus:ring-2 focus:ring-[#D31145]/20"
+                    placeholder="Enter unit manager name"
+                    required={formData.unitManager === 'Others'}
+                  />
+                )}
+                {formData.agencyName && formData.agencyName !== 'Other' && formData.agencyName !== 'No Agency' && unitManagers.length === 0 && (
                   <p className="text-xs text-slate-500 mt-1">
-                    No units found. Please ensure the hierarchy has been imported for this agency.
+                    No unit managers found. You can select "Others" to enter manually.
                   </p>
+                )}
+                {(formData.agencyName === 'Other' || formData.agencyName === 'No Agency') && (
+                  <input
+                    type="text"
+                    value={formData.unitManagerOther}
+                    onChange={(e) => setFormData({ ...formData, unitManagerOther: e.target.value })}
+                    className="w-full p-3 mt-2 border-2 border-slate-200 rounded-lg focus:border-[#D31145] focus:ring-2 focus:ring-[#D31145]/20"
+                    placeholder="Enter unit manager name"
+                    required
+                  />
                 )}
               </div>
 
@@ -494,9 +632,58 @@ export default function SignupPage() {
                 </div>
               </div>
 
+              {/* Role and Rank selection (shown when name not found in hierarchy) */}
+              {(!hierarchyInfo || !autoFilledData) && (
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-sm font-semibold text-slate-700 mb-2">
+                      Role *
+                    </label>
+                    <select
+                      value={formData.role}
+                      onChange={(e) => {
+                        const newRole = e.target.value as 'advisor' | 'leader';
+                        setFormData({ 
+                          ...formData, 
+                          role: newRole,
+                          rank: newRole === 'leader' ? 'AUM' : 'ADV'
+                        });
+                      }}
+                      className="w-full p-3 border-2 border-slate-200 rounded-lg focus:border-[#D31145] focus:ring-2 focus:ring-[#D31145]/20"
+                      required
+                    >
+                      <option value="advisor">Advisor</option>
+                      <option value="leader">Leader</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block text-sm font-semibold text-slate-700 mb-2">
+                      Rank *
+                    </label>
+                    <select
+                      value={formData.rank}
+                      onChange={(e) => setFormData({ ...formData, rank: e.target.value as typeof formData.rank })}
+                      className="w-full p-3 border-2 border-slate-200 rounded-lg focus:border-[#D31145] focus:ring-2 focus:ring-[#D31145]/20"
+                      required
+                    >
+                      {formData.role === 'leader' ? (
+                        <>
+                          <option value="AUM">AUM (Associate Unit Manager)</option>
+                          <option value="UM">UM (Unit Manager)</option>
+                          <option value="SUM">SUM (Senior Unit Manager)</option>
+                          <option value="ADD">ADD (Agency/District Director)</option>
+                        </>
+                      ) : (
+                        <option value="ADV">ADV (Advisor)</option>
+                      )}
+                    </select>
+                  </div>
+                </div>
+              )}
+
               <button
                 type="submit"
-                disabled={loading || !hierarchyInfo || !autoFilledData}
+                disabled={loading}
                 className="w-full bg-[#D31145] text-white font-bold py-3 rounded-lg hover:bg-[#B00E3A] transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 {loading ? 'Creating Account...' : 'Create Account'}
@@ -509,9 +696,14 @@ export default function SignupPage() {
                 </a>
               </p>
             </form>
+              </>
+            )}
           </div>
         </div>
       </main>
+
+      {/* AI Chatbot (only show when using form mode) */}
+      {!useChatbot && <AIChatbot context={chatContext} />}
     </div>
   );
 }

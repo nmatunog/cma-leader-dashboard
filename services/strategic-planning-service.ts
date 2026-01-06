@@ -1,5 +1,6 @@
 import { doc, getDoc, setDoc, collection, query, where, getDocs, orderBy, limit, deleteDoc, writeBatch } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
+import { getUnitsUnderSUM, getDirectAdvisorsUnderSUM } from '@/services/organizational-hierarchy-service';
 
 const GOALS_COLLECTION = 'strategic_planning_goals';
 
@@ -232,6 +233,60 @@ export async function getUnitGoal(unitManager: string, agencyName: string): Prom
   } catch (error) {
     console.error('Error loading unit goal:', error);
     return null;
+  }
+}
+
+/**
+ * Get goals for a SUM (consolidated view: all UMs under SUM + direct advisors)
+ */
+export async function getGoalsForSUM(sumName: string, agencyName: string): Promise<StrategicPlanningGoal[]> {
+  try {
+    const allGoals: StrategicPlanningGoal[] = [];
+    
+    // 1. Get all UMs under this SUM
+    const umNames = await getUnitsUnderSUM(sumName, agencyName);
+    
+    // 2. Get goals for each UM's unit
+    for (const umName of umNames) {
+      const unitGoals = await getUnitGoals(umName, agencyName);
+      allGoals.push(...unitGoals);
+    }
+    
+    // 3. Get goals from direct advisors under SUM
+    const directAdvisors = await getDirectAdvisorsUnderSUM(sumName, agencyName);
+    for (const advisor of directAdvisors) {
+      // Query goals where unitName matches SUM's unit name format
+      const unitName = `${sumName}_${agencyName}`;
+      const q = query(
+        collection(db, GOALS_COLLECTION),
+        where('unitName', '==', unitName),
+        where('userName', '==', advisor.name)
+      );
+      
+      const querySnapshot = await getDocs(q);
+      querySnapshot.forEach((doc) => {
+        const data = doc.data();
+        allGoals.push({
+          ...data,
+          submittedAt: data.submittedAt?.toDate() || new Date(),
+        } as StrategicPlanningGoal);
+      });
+    }
+    
+    // Remove duplicates based on goal ID and sort by submitted date
+    const uniqueGoalsMap = new Map<string, StrategicPlanningGoal>();
+    allGoals.forEach(goal => {
+      const key = goal.id || `${goal.userId}_${goal.agencyName}_${goal.submittedAt.getTime()}`;
+      if (!uniqueGoalsMap.has(key)) {
+        uniqueGoalsMap.set(key, goal);
+      }
+    });
+    
+    const uniqueGoals = Array.from(uniqueGoalsMap.values());
+    return uniqueGoals.sort((a, b) => b.submittedAt.getTime() - a.submittedAt.getTime());
+  } catch (error) {
+    console.error('Error getting goals for SUM:', error);
+    return [];
   }
 }
 

@@ -7,9 +7,11 @@ interface AIModalProps {
   onClose: () => void;
   title: string;
   content: string;
+  onDownloadPDF?: () => void;
+  showDownloadButton?: boolean;
 }
 
-export function AIModal({ isOpen, onClose, title, content }: AIModalProps) {
+export function AIModal({ isOpen, onClose, title, content, onDownloadPDF, showDownloadButton = false }: AIModalProps) {
   if (!isOpen) return null;
 
   // marked() returns a string synchronously in the version we're using
@@ -37,7 +39,17 @@ export function AIModal({ isOpen, onClose, title, content }: AIModalProps) {
           className="p-4 sm:p-5 lg:p-6 overflow-y-auto prose prose-sm max-w-none text-slate-700"
           dangerouslySetInnerHTML={{ __html: htmlContent }}
         />
-        <div className="p-3 sm:p-4 lg:p-5 border-t border-slate-200 bg-gradient-to-r from-slate-50 to-red-50/30 rounded-b-xl sm:rounded-b-2xl flex justify-end">
+        <div className="p-3 sm:p-4 lg:p-5 border-t border-slate-200 bg-gradient-to-r from-slate-50 to-red-50/30 rounded-b-xl sm:rounded-b-2xl flex justify-between items-center gap-3">
+          {showDownloadButton && onDownloadPDF && (
+            <button
+              onClick={onDownloadPDF}
+              className="px-4 py-2 sm:px-6 sm:py-2.5 bg-gradient-to-r from-blue-600 to-blue-700 text-white rounded-lg text-xs sm:text-sm font-bold shadow-md hover:shadow-lg hover:scale-105 transition-all duration-200 flex items-center gap-2"
+            >
+              <span>📥</span>
+              <span>Download PDF</span>
+            </button>
+          )}
+          <div className="flex-1"></div>
           <button
             onClick={onClose}
             className="px-4 py-2 sm:px-6 sm:py-2.5 bg-gradient-to-r from-[#D31145] to-red-600 text-white rounded-lg text-xs sm:text-sm font-bold shadow-md hover:shadow-lg hover:scale-105 transition-all duration-200"

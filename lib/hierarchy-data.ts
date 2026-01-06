@@ -171,7 +171,7 @@ export const HARDCODED_HIERARCHY_DATA: HierarchyEntryData[] = [
   { name: "CHEVY P. MODESTO", displayName: "CHEVY P. MODESTO", rank: "ADV", unitManager: "MARIA ESTRELLA C. MATUNOG", agencyName: "CEBU-MATUNOG AGENCY" },
   { name: "MARY JEAN S. POL", displayName: "MARY JEAN S. POL", rank: "ADV", unitManager: "MARIA ESTRELLA C. MATUNOG", agencyName: "CEBU-MATUNOG AGENCY" },
   { name: "AMORGANDA R. RAGO", displayName: "AMORGANDA R. RAGO", rank: "ADV", unitManager: "MARIA ESTRELLA C. MATUNOG", agencyName: "CEBU-MATUNOG AGENCY" },
-  { name: "TRYZHA A. RECTO", displayName: "TRYZHA A. RECTO", rank: "ADV", unitManager: "MARIA ESTRELLA C. MATUNOG", agencyName: "CEBU-MATUNOG AGENCY" },
+  { name: "TRYZHA A. RECTO", displayName: "TRYZHA A. RECTO", rank: "UM", unitManager: "MARIA ESTRELLA C. MATUNOG", agencyName: "CEBU-MATUNOG AGENCY" },
   { name: "JADE B. SACDALAN", displayName: "JADE B. SACDALAN", rank: "ADV", unitManager: "MARIA ESTRELLA C. MATUNOG", agencyName: "CEBU-MATUNOG AGENCY" },
   { name: "ALMA B. SALDO", displayName: "ALMA B. SALDO", rank: "ADV", unitManager: "MARIA ESTRELLA C. MATUNOG", agencyName: "CEBU-MATUNOG AGENCY" },
   { name: "CHRISTY MAE C. SANDAGA", displayName: "CHRISTY MAE C. SANDAGA", rank: "ADV", unitManager: "MARIA ESTRELLA C. MATUNOG", agencyName: "CEBU-MATUNOG AGENCY" },
@@ -197,13 +197,13 @@ export const HARDCODED_HIERARCHY_DATA: HierarchyEntryData[] = [
   
   // Advisors under UM Virginia B. Iway
   // Note: I/IWAY/VIRGINIA/B@ is the UM herself, so we don't include her as an advisor entry
-  { name: "ELTON T. BERMISO", displayName: "ELTON T. BERMISO", rank: "ADV", unitManager: "VIRGINIA B. IWAY", agencyName: "CEBU-MATUNOG AGENCY" },
-  { name: "ROSE MARIE G. BERMISO", displayName: "ROSE MARIE G. BERMISO", rank: "ADV", unitManager: "VIRGINIA B. IWAY", agencyName: "CEBU-MATUNOG AGENCY" },
-  { name: "GEMMA T. LATINAZO", displayName: "GEMMA T. LATINAZO", rank: "ADV", unitManager: "VIRGINIA B. IWAY", agencyName: "CEBU-MATUNOG AGENCY" },
-  { name: "DENNI DOMINIC M. LEPON", displayName: "DENNI DOMINIC M. LEPON", rank: "ADV", unitManager: "VIRGINIA B. IWAY", agencyName: "CEBU-MATUNOG AGENCY" },
-  { name: "GERALYN JANE D. LEPON", displayName: "GERALYN JANE D. LEPON", rank: "ADV", unitManager: "VIRGINIA B. IWAY", agencyName: "CEBU-MATUNOG AGENCY" },
-  { name: "MICHELLE R. LOMODAG", displayName: "MICHELLE R. LOMODAG", rank: "ADV", unitManager: "VIRGINIA B. IWAY", agencyName: "CEBU-MATUNOG AGENCY" },
-  { name: "NELMAR L. SAYSON", displayName: "NELMAR L. SAYSON", rank: "ADV", unitManager: "VIRGINIA B. IWAY", agencyName: "CEBU-MATUNOG AGENCY" },
+  { name: "ELTON T. BERMISO", displayName: "ELTON T. BERMISO", rank: "ADV", unitManager: "VIRGINIA B. IWAY", agencyName: "CEBU-EZ MATUNOG AGENCY" },
+  { name: "ROSE MARIE G. BERMISO", displayName: "ROSE MARIE G. BERMISO", rank: "ADV", unitManager: "VIRGINIA B. IWAY", agencyName: "CEBU-EZ MATUNOG AGENCY" },
+  { name: "GEMMA T. LATINAZO", displayName: "GEMMA T. LATINAZO", rank: "ADV", unitManager: "VIRGINIA B. IWAY", agencyName: "CEBU-EZ MATUNOG AGENCY" },
+  { name: "DENNI DOMINIC M. LEPON", displayName: "DENNI DOMINIC M. LEPON", rank: "ADV", unitManager: "VIRGINIA B. IWAY", agencyName: "CEBU-EZ MATUNOG AGENCY" },
+  { name: "GERALYN JANE D. LEPON", displayName: "GERALYN JANE D. LEPON", rank: "ADV", unitManager: "VIRGINIA B. IWAY", agencyName: "CEBU-EZ MATUNOG AGENCY" },
+  { name: "MICHELLE R. LOMODAG", displayName: "MICHELLE R. LOMODAG", rank: "ADV", unitManager: "VIRGINIA B. IWAY", agencyName: "CEBU-EZ MATUNOG AGENCY" },
+  { name: "NELMAR L. SAYSON", displayName: "NELMAR L. SAYSON", rank: "ADV", unitManager: "VIRGINIA B. IWAY", agencyName: "CEBU-EZ MATUNOG AGENCY" },
   
   // Advisors under UM Evelyn C. Mondero
   // Note: I/MONDERO/EVELYN/C@ is the UM herself, so we don't include her as an advisor entry

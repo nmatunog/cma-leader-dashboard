@@ -3,9 +3,11 @@
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { Sidebar } from '@/components/sidebar';
-import { getAllGoals, getAgencyGoals, type StrategicPlanningGoal } from '@/services/strategic-planning-service';
+import { getAllGoals, getAgencyGoals, getGoalsForSUM, getUnitGoals, type StrategicPlanningGoal } from '@/services/strategic-planning-service';
+import { getAllSUMsInAgency, getUnitsUnderSUM, getUnitsByAgency } from '@/services/organizational-hierarchy-service';
 import { formatNumberWithCommas } from '@/components/strategic-planning/utils/number-format';
 import { useAuth } from '@/contexts/auth-context';
+import { formatDisplayName } from '@/lib/utils/name-formatter';
 
 interface QuarterlyData {
   baseManpower: number;
@@ -66,33 +68,135 @@ export default function ReportsPage() {
   const [filterAgency, setFilterAgency] = useState<string>('all');
   const [filterRank, setFilterRank] = useState<string>('all');
   const [filterUnit, setFilterUnit] = useState<string>('all');
+  const [filterSUM, setFilterSUM] = useState<string>('all'); // For ADD/DD users
   const [aggregated, setAggregated] = useState<AggregatedData | null>(null);
   const [selectedGoal, setSelectedGoal] = useState<StrategicPlanningGoal | null>(null);
   const [showQuarterlySummary, setShowQuarterlySummary] = useState(false);
+  const [availableSUMs, setAvailableSUMs] = useState<string[]>([]);
+  const [availableUnitsForSUM, setAvailableUnitsForSUM] = useState<string[]>([]);
 
-  // Check if user is admin
+  // Load filter options for ADD users
+  const loadFilterOptions = async () => {
+    if (!user || user.rank !== 'ADD' || !user.agencyName) return;
+    
+    try {
+      // Load SUM list
+      const sums = await getAllSUMsInAgency(user.agencyName);
+      setAvailableSUMs(sums.map(sum => sum.name));
+      
+      // Load units based on SUM filter
+      await updateAvailableUnits();
+    } catch (err) {
+      console.error('Error loading filter options:', err);
+    }
+  };
+
+  // Update available units based on SUM filter
+  const updateAvailableUnits = async () => {
+    if (!user || user.rank !== 'ADD' || !user.agencyName) return;
+    
+    try {
+      if (filterSUM !== 'all') {
+        // Get units under selected SUM
+        const umNames = await getUnitsUnderSUM(filterSUM, user.agencyName);
+        setAvailableUnitsForSUM(umNames.map(umName => `${umName}_${user.agencyName}`));
+      } else {
+        // Get all units in agency
+        const allUnits = await getUnitsByAgency(user.agencyName);
+        setAvailableUnitsForSUM(allUnits.map(umName => `${umName}_${user.agencyName}`));
+      }
+    } catch (err) {
+      console.error('Error updating available units:', err);
+    }
+  };
+
+  // Check authorization - allow ADMIN, ADD, SUM, UM
   useEffect(() => {
     if (!authLoading) {
-      if (!user || user.role !== 'admin') {
+      if (!user) {
         router.push('/login');
-      } else {
-        loadGoals();
+        return;
       }
+      
+      const allowedRanks = ['ADMIN', 'ADD', 'SUM', 'UM'];
+      
+      if (!allowedRanks.includes(user.rank)) {
+        router.push('/login');
+        return;
+      }
+      
+      // Load filter options for ADD users
+      if (user.rank === 'ADD' && user.agencyName) {
+        loadFilterOptions();
+      }
+      
+      loadGoals();
     }
   }, [user, authLoading, router]);
+
+  // Reload goals when filters change for ADD users
+  useEffect(() => {
+    if (user && user.rank === 'ADD' && !authLoading && !loading) {
+      loadGoals();
+    }
+  }, [filterSUM, filterUnit]);
 
   useEffect(() => {
     if (goals.length > 0) {
       calculateAggregates();
     }
-  }, [goals, filterAgency, filterRank, filterUnit]);
+  }, [goals, filterAgency, filterRank, filterUnit, filterSUM]);
+
+  // Update available units when SUM filter changes
+  useEffect(() => {
+    if (user?.rank === 'ADD' && user.agencyName) {
+      updateAvailableUnits().then(() => {
+        // Reset unit filter if current selection is not in available units
+        if (filterUnit !== 'all' && !availableUnitsForSUM.includes(filterUnit)) {
+          setFilterUnit('all');
+        }
+      });
+    }
+  }, [filterSUM]);
 
   const loadGoals = async () => {
+    if (!user) return;
+    
     try {
       setLoading(true);
       setError(null);
-      const allGoals = await getAllGoals();
-      setGoals(allGoals);
+      let loadedGoals: StrategicPlanningGoal[] = [];
+      
+      if (user.role === 'admin' || user.role === 'superuser' || user.rank === 'ADMIN') {
+        // Admin: Get all goals
+        loadedGoals = await getAllGoals();
+      } else if (user.rank === 'ADD') {
+        // ADD: Handle filters (Overall, By SUM, By Unit)
+        if (filterSUM !== 'all' && filterUnit === 'all') {
+          // Filter by SUM only
+          loadedGoals = await getGoalsForSUM(filterSUM, user.agencyName);
+        } else if (filterUnit !== 'all') {
+          // Filter by Unit (regardless of SUM filter)
+          const unitParts = filterUnit.split('_'); // Format: "UM_NAME_AGENCY_NAME"
+          const umName = unitParts.slice(0, -1).join('_'); // Handle names with underscores
+          loadedGoals = await getUnitGoals(umName, user.agencyName);
+        } else {
+          // Overall agency view (both filters = 'all')
+          loadedGoals = await getAgencyGoals(user.agencyName);
+        }
+      } else if (user.rank === 'SUM') {
+        // SUM: Get consolidated goals
+        loadedGoals = await getGoalsForSUM(user.name, user.agencyName);
+      } else if (user.rank === 'UM') {
+        // UM: Get unit goals
+        loadedGoals = await getUnitGoals(user.name, user.agencyName);
+      } else {
+        // Others: No access
+        router.push('/login');
+        return;
+      }
+      
+      setGoals(loadedGoals);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load reports');
       console.error('Error loading goals:', err);
@@ -310,14 +414,14 @@ export default function ReportsPage() {
     ];
 
     const rows = filteredGoals.map(goal => [
-      goal.userName,
+      formatDisplayName(goal.userName),
       goal.userRank,
-      goal.unitManager,
+      formatDisplayName(goal.unitManager),
       goal.agencyName,
       goal.submittedAt.toLocaleDateString(),
-      goal.dec2025FYP,
-      goal.dec2025FYC,
-      goal.dec2025Cases,
+      goal.monthlyTargetFYP,
+      goal.monthlyTargetFYC,
+      goal.monthlyTargetCases,
       goal.q1.baseManpower,
       goal.q1.newRecruits,
       goal.q1.fyp,
@@ -378,8 +482,13 @@ export default function ReportsPage() {
     );
   }
 
-  // If not admin, show nothing (will redirect)
-  if (!user || user.role !== 'admin') {
+  // If not authorized, show nothing (will redirect)
+  if (!user) {
+    return null;
+  }
+  
+  const allowedRanks = ['ADMIN', 'ADD', 'SUM', 'UM'];
+  if (!allowedRanks.includes(user.rank)) {
     return null;
   }
 
@@ -396,36 +505,60 @@ export default function ReportsPage() {
           {/* Filters */}
           <div className="bg-white rounded-lg shadow-md p-4 mb-6">
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-              <div>
-                <label className="block text-sm font-semibold text-slate-700 mb-2">Filter by Agency</label>
-                <select
-                  value={filterAgency}
-                  onChange={(e) => {
-                    setFilterAgency(e.target.value);
-                    setFilterUnit('all'); // Reset unit filter when agency changes
-                  }}
-                  className="w-full p-2 border-2 border-slate-200 rounded-lg focus:border-[#D31145] focus:ring-2 focus:ring-[#D31145]/20"
-                >
-                  <option value="all">All Agencies</option>
-                  {agencies.map(agency => (
-                    <option key={agency} value={agency}>{agency}</option>
-                  ))}
-                </select>
-              </div>
+              {/* Agency Filter - Only for Admin */}
+              {user.rank === 'ADMIN' && (
+                <div>
+                  <label className="block text-sm font-semibold text-slate-700 mb-2">Filter by Agency</label>
+                  <select
+                    value={filterAgency}
+                    onChange={(e) => {
+                      setFilterAgency(e.target.value);
+                      setFilterUnit('all'); // Reset unit filter when agency changes
+                    }}
+                    className="w-full p-2 border-2 border-slate-200 rounded-lg focus:border-[#D31145] focus:ring-2 focus:ring-[#D31145]/20"
+                  >
+                    <option value="all">All Agencies</option>
+                    {agencies.map(agency => (
+                      <option key={agency} value={agency}>{agency}</option>
+                    ))}
+                  </select>
+                </div>
+              )}
+              
+              {/* SUM Filter - Only for ADD */}
+              {user.rank === 'ADD' && (
+                <div>
+                  <label className="block text-sm font-semibold text-slate-700 mb-2">Filter by SUM</label>
+                  <select
+                    value={filterSUM}
+                    onChange={(e) => {
+                      setFilterSUM(e.target.value);
+                      setFilterUnit('all'); // Reset unit filter when SUM changes
+                    }}
+                    className="w-full p-2 border-2 border-slate-200 rounded-lg focus:border-[#D31145] focus:ring-2 focus:ring-[#D31145]/20"
+                  >
+                    <option value="all">All SUMs (Overall Agency)</option>
+                    {availableSUMs.map(sum => (
+                      <option key={sum} value={sum}>{sum}</option>
+                    ))}
+                  </select>
+                </div>
+              )}
+              
               <div>
                 <label className="block text-sm font-semibold text-slate-700 mb-2">Filter by Unit</label>
                 <select
                   value={filterUnit}
                   onChange={(e) => setFilterUnit(e.target.value)}
                   className="w-full p-2 border-2 border-slate-200 rounded-lg focus:border-[#D31145] focus:ring-2 focus:ring-[#D31145]/20"
-                  disabled={units.length === 0}
+                  disabled={user.rank === 'ADD' ? availableUnitsForSUM.length === 0 : units.length === 0}
                 >
                   <option value="all">All Units</option>
                   {units.map(unitName => {
                     // Extract unit manager name from unitName format: "UnitManager_Agency"
                     const unitManagerName = unitName.split('_').slice(0, -1).join('_');
                     return (
-                      <option key={unitName} value={unitName}>{unitManagerName}</option>
+                      <option key={unitName} value={unitName}>{formatDisplayName(unitManagerName)}</option>
                     );
                   })}
                 </select>
@@ -568,7 +701,7 @@ export default function ReportsPage() {
                           })
                           .map(([unitName, data]) => (
                             <tr key={unitName} className="border-b border-slate-100 hover:bg-slate-50">
-                              <td className="p-3 font-medium">{data.unitManager}</td>
+                              <td className="p-3 font-medium">{formatDisplayName(data.unitManager)}</td>
                               <td className="p-3">{data.agencyName}</td>
                               <td className="p-3 text-right">{data.count}</td>
                               <td className="p-3 text-right">{Math.round(data.manpower)}</td>
@@ -734,9 +867,9 @@ export default function ReportsPage() {
                                                    (goal.q4?.newRecruits || 0);
                           return (
                             <tr key={goal.id} className="border-b border-slate-100 hover:bg-slate-50">
-                              <td className="p-3 font-medium">{goal.userName}</td>
+                              <td className="p-3 font-medium">{formatDisplayName(goal.userName)}</td>
                               <td className="p-3">{goal.userRank}</td>
-                              <td className="p-3">{goal.unitManager}</td>
+                              <td className="p-3">{formatDisplayName(goal.unitManager)}</td>
                               <td className="p-3">{goal.agencyName}</td>
                               <td className="p-3 text-right">{Math.round(annualNewRecruits)}</td>
                               <td className="p-3 text-right">₱{formatNumberWithCommas(Math.round(goal.annualFYP))}</td>
@@ -767,7 +900,7 @@ export default function ReportsPage() {
             <div className="fixed inset-0 bg-black/50 flex items-center justify-center p-4 z-50" onClick={() => setSelectedGoal(null)}>
               <div className="bg-white rounded-lg shadow-xl max-w-4xl w-full max-h-[90vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
                 <div className="sticky top-0 bg-[#D31145] text-white p-4 flex justify-between items-center">
-                  <h3 className="text-xl font-bold">Report Details - {selectedGoal.userName}</h3>
+                  <h3 className="text-xl font-bold">Report Details - {formatDisplayName(selectedGoal.userName)}</h3>
                   <button
                     onClick={() => setSelectedGoal(null)}
                     className="text-white hover:text-gray-200 text-2xl"
@@ -779,7 +912,7 @@ export default function ReportsPage() {
                   <div className="grid grid-cols-2 gap-4 mb-6">
                     <div>
                       <p className="text-sm text-slate-600">Name</p>
-                      <p className="font-semibold">{selectedGoal.userName}</p>
+                      <p className="font-semibold">{formatDisplayName(selectedGoal.userName)}</p>
                     </div>
                     <div>
                       <p className="text-sm text-slate-600">Rank</p>
@@ -787,7 +920,7 @@ export default function ReportsPage() {
                     </div>
                     <div>
                       <p className="text-sm text-slate-600">Unit Manager</p>
-                      <p className="font-semibold">{selectedGoal.unitManager}</p>
+                      <p className="font-semibold">{formatDisplayName(selectedGoal.unitManager)}</p>
                     </div>
                     <div>
                       <p className="text-sm text-slate-600">Agency</p>
@@ -803,15 +936,15 @@ export default function ReportsPage() {
                   <div className="grid grid-cols-3 gap-4 mb-6">
                     <div className="bg-blue-50 p-3 rounded">
                       <p className="text-sm text-blue-700">FYP</p>
-                      <p className="font-bold text-blue-900">₱{formatNumberWithCommas(Math.round(selectedGoal.dec2025FYP))}</p>
+                      <p className="font-bold text-blue-900">₱{formatNumberWithCommas(Math.round(selectedGoal.monthlyTargetFYP))}</p>
                     </div>
                     <div className="bg-green-50 p-3 rounded">
                       <p className="text-sm text-green-700">FYC</p>
-                      <p className="font-bold text-green-900">₱{formatNumberWithCommas(Math.round(selectedGoal.dec2025FYC))}</p>
+                      <p className="font-bold text-green-900">₱{formatNumberWithCommas(Math.round(selectedGoal.monthlyTargetFYC))}</p>
                     </div>
                     <div className="bg-purple-50 p-3 rounded">
                       <p className="text-sm text-purple-700">Cases</p>
-                      <p className="font-bold text-purple-900">{selectedGoal.dec2025Cases}</p>
+                      <p className="font-bold text-purple-900">{selectedGoal.monthlyTargetCases}</p>
                     </div>
                   </div>
 

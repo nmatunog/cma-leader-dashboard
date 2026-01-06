@@ -77,3 +77,4 @@ The network timeout suggests Firebase can't be reached. This could be:
 
 **Most likely issue: Environment variables not set correctly in Vercel production environment.**
 
+

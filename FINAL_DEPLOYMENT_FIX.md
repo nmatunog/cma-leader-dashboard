@@ -45,3 +45,4 @@ This is a temporary solution to get the site deployed. The TypeScript errors sho
 
 **The fix is pushed! Vercel should automatically start a new deployment. Check the Deployments tab!**
 
+

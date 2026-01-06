@@ -138,4 +138,64 @@ export function normalizeName(name: string): string {
   return name.trim().toUpperCase().replace(/\s+/g, ' ');
 }
 
+/**
+ * Format name for consistent display (Title Case)
+ * Converts names to proper title case format:
+ * - "JOHN DOE" -> "John Doe"
+ * - "john doe" -> "John Doe"
+ * - "JOHN D. SMITH" -> "John D. Smith"
+ * - "MARIA ESTRELLA C. MATUNOG" -> "Maria Estrella C. Matunog"
+ * - Handles single letters (initials) and common prefixes/suffixes
+ */
+export function formatDisplayName(name: string | null | undefined): string {
+  if (!name) return '';
+  
+  // Trim and normalize spaces
+  let normalized = name.trim().replace(/\s+/g, ' ');
+  
+  // If already in mixed case (has lowercase letters), assume it's already formatted
+  // Otherwise, convert from all caps to title case
+  if (normalized === normalized.toUpperCase() || normalized === normalized.toLowerCase()) {
+    // Split by spaces
+    const parts = normalized.split(' ');
+    
+    // Format each part
+    const formattedParts = parts.map((part, index) => {
+      // Remove any trailing periods first
+      const cleanPart = part.replace(/\.$/, '');
+      
+      // Single letter (initial) - keep uppercase with period
+      if (cleanPart.length === 1) {
+        return cleanPart.toUpperCase() + '.';
+      }
+      
+      // Handle common prefixes/suffixes (Jr., Sr., III, etc.)
+      const upperPart = cleanPart.toUpperCase();
+      if (['JR', 'SR', 'II', 'III', 'IV', 'V'].includes(upperPart)) {
+        return upperPart;
+      }
+      
+      // Handle "DE", "DEL", "LA", "VAN", "VON" etc. (keep lowercase in middle)
+      const lowerPart = cleanPart.toLowerCase();
+      const keepLowercase = ['de', 'del', 'la', 'van', 'von', 'y', 'e'];
+      if (keepLowercase.includes(lowerPart) && index > 0 && index < parts.length - 1) {
+        return lowerPart;
+      }
+      
+      // Title case: first letter uppercase, rest lowercase
+      if (cleanPart.length > 0) {
+        return cleanPart.charAt(0).toUpperCase() + cleanPart.slice(1).toLowerCase();
+      }
+      
+      return cleanPart;
+    });
+    
+    // Join parts back together
+    normalized = formattedParts.join(' ');
+  }
+  
+  return normalized;
+}
+
+
 

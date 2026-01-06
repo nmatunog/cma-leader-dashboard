@@ -10,7 +10,7 @@ import { Eye, EyeOff } from 'lucide-react';
 export default function LoginPage() {
   const router = useRouter();
   const { user, loading } = useAuth();
-  const [email, setEmail] = useState('');
+  const [emailOrCode, setEmailOrCode] = useState('');
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
@@ -22,7 +22,7 @@ export default function LoginPage() {
   // Redirect if already logged in
   useEffect(() => {
     if (!loading && user) {
-      if (user.role === 'admin') {
+      if (user.role === 'admin' || user.role === 'superuser') {
         router.push('/reports');
       } else {
         router.push('/strategic-planning');
@@ -36,13 +36,13 @@ export default function LoginPage() {
     setIsLoading(true);
 
     try {
-      if (!email.trim()) {
-        setError('Please enter your email');
+      if (!emailOrCode.trim()) {
+        setError('Please enter your email or code');
         setIsLoading(false);
         return;
       }
 
-      const result = await loginUser(email.trim(), password);
+      const result = await loginUser(emailOrCode.trim(), password);
       
       if (result.success && result.user) {
         // Check if user has temporary password - redirect to password change
@@ -52,7 +52,7 @@ export default function LoginPage() {
         }
         
         // Redirect based on role
-        if (result.user.role === 'admin') {
+        if (result.user.role === 'admin' || result.user.role === 'superuser') {
           router.push('/reports');
         } else {
           router.push('/strategic-planning');
@@ -187,18 +187,21 @@ export default function LoginPage() {
             <form onSubmit={handleLogin} className="space-y-5">
               <div>
                 <label className="block text-xs font-bold text-slate-600 uppercase mb-2 tracking-wide">
-                  Email Address
+                  Email Address or Code
                 </label>
                 <input
-                  type="email"
-                  value={email}
-                  onChange={(e) => setEmail(e.target.value)}
+                  type="text"
+                  value={emailOrCode}
+                  onChange={(e) => setEmailOrCode(e.target.value)}
                   className="w-full p-3.5 border-2 border-slate-200 rounded-xl outline-none focus:border-[#D31145] focus:ring-2 focus:ring-[#D31145]/20 transition-all shadow-sm text-base"
-                  placeholder="Enter your email"
+                  placeholder="Enter your email or advisor/leader code"
                   required
                   disabled={isLoading}
-                  autoComplete="email"
+                  autoComplete="username"
                 />
+                <p className="text-xs text-slate-500 mt-1">
+                  You can use either your email address or your advisor/leader code to log in
+                </p>
               </div>
               <div>
                 <label className="block text-xs font-bold text-slate-600 uppercase mb-2 tracking-wide">

@@ -49,3 +49,4 @@ This is used by the `getHierarchyByAgency()` function to retrieve all hierarchy 
 
 We could remove one of the `orderBy` clauses to avoid needing an index, but this would affect the sorting of the hierarchy data. It's better to create the index.
 
+

@@ -158,8 +158,8 @@ export function AgentsTargetsTable() {
               <TableBody>
                 {agents.map((agent) => (
                   <TableRow key={agent.id}>
-                    <TableCell className="font-medium">{agent.umName}</TableCell>
-                    <TableCell>{agent.name}</TableCell>
+                    <TableCell className="font-medium">{formatDisplayName(agent.umName)}</TableCell>
+                    <TableCell>{formatDisplayName(agent.name)}</TableCell>
                     <TableCell>
                       {isEditMode ? (
                         <Input

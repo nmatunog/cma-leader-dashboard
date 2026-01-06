@@ -4,7 +4,7 @@
 
 import { Timestamp } from 'firebase/firestore';
 
-export type UserRole = 'admin' | 'leader' | 'advisor';
+export type UserRole = 'superuser' | 'admin' | 'leader' | 'advisor';
 export type UserRank = 'ADMIN' | 'ADD' | 'SUM' | 'UM' | 'AUM' | 'ADV';
 
 export interface User {

@@ -2,13 +2,22 @@ rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
     
-    // Helper function to check if current user is admin
+    // Helper function to check if current user is admin or superuser
     // Only use AFTER user can read their own document (no circular dependency)
     function isAdmin() {
       return request.auth != null && 
              exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
-             get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin' &&
-             get(/databases/$(database)/documents/users/$(request.auth.uid)).data.isActive == true;
+             (get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin' ||
+              get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'superuser') &&
+             (get(/databases/$(database)/documents/users/$(request.auth.uid)).data.isActive != false);
+    }
+    
+    // Helper function to check if current user is superuser
+    function isSuperuser() {
+      return request.auth != null && 
+             exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
+             get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'superuser' &&
+             (get(/databases/$(database)/documents/users/$(request.auth.uid)).data.isActive != false);
     }
     
     // Helper function to check if current user is active
@@ -31,10 +40,23 @@ service cloud.firestore {
       // Allow users to create their own user document (for self-signup)
       // Allow setup page to create first admin (request.auth == null for initial setup)
       // Allow admins to create users
+      // BUT: Only superusers can create admin or superuser roles
       allow create: if request.auth == null || 
                       (request.auth != null && request.auth.uid == userId) ||
-                      isAdmin();
-      allow update: if isAdmin();
+                      (isAdmin() && 
+                       (request.resource.data.role != 'admin' && request.resource.data.role != 'superuser')) ||
+                      (isSuperuser() && 
+                       (request.resource.data.role == 'admin' || request.resource.data.role == 'superuser'));
+      
+      // Only superusers can update users to admin or superuser roles
+      // Regular admins can update other fields
+      allow update: if isSuperuser() ||
+                      (isAdmin() && 
+                       request.resource.data.role != 'admin' && 
+                       request.resource.data.role != 'superuser' &&
+                       resource.data.role != 'admin' && 
+                       resource.data.role != 'superuser');
+      
       allow delete: if isAdmin();
       
       // Users can update their own profile (limited fields)

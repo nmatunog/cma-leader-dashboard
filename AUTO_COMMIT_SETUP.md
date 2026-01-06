@@ -179,3 +179,4 @@ pkill -f auto-commit.sh
 - The script runs in the background and won't interrupt your work
 
 
+
