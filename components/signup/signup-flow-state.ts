@@ -90,4 +90,3 @@ export function hasAllRequiredData(data: CollectedSignupData): boolean {
     data.password
   );
 }
-

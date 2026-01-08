@@ -93,5 +93,3 @@ After deployment completes:
 - **Environment Variables:** Required for temp password feature to work
 - **Code Field:** Still stored in user data, just not used for login
 - **Email-Only Login:** All users must use email to log in now
-
-

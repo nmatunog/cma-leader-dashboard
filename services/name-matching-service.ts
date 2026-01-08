@@ -237,4 +237,3 @@ export function getAllUnitManagersFromHierarchy(): string[] {
   }
   return Array.from(unitManagers).sort();
 }
-

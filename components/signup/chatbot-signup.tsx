@@ -1,7 +1,8 @@
 'use client';
 
 import { useState, useRef, useEffect } from 'react';
-import { MessageCircle, Send, Loader2 } from 'lucide-react';
+import { useRouter } from 'next/navigation';
+import { MessageCircle, Send, Loader2, LogIn } from 'lucide-react';
 import type { SignupFlowState, SignupStep, CollectedSignupData } from './signup-flow-state';
 import { INITIAL_SIGNUP_STATE } from './signup-flow-state';
 import { 
@@ -28,6 +29,7 @@ interface ChatbotSignupProps {
 }
 
 export function ChatbotSignup({ onComplete, onCancel }: ChatbotSignupProps) {
+  const router = useRouter();
   const [messages, setMessages] = useState<ChatMessage[]>([
     {
       role: 'assistant',
@@ -840,15 +842,25 @@ Please try again or contact support.`
           <MessageCircle className="w-5 h-5" />
           <span className="font-semibold">Signup Assistant</span>
         </div>
-        {onCancel && (
+        <div className="flex items-center gap-2">
           <button
-            onClick={onCancel}
-            className="hover:bg-white/20 rounded p-1 transition-colors"
-            aria-label="Cancel"
+            onClick={() => router.push('/login')}
+            className="flex items-center gap-1.5 px-3 py-1.5 bg-white/20 hover:bg-white/30 rounded-lg transition-colors text-sm font-medium"
+            aria-label="Log In"
           >
-            ✕
+            <LogIn className="w-4 h-4" />
+            <span>Log In</span>
           </button>
-        )}
+          {onCancel && (
+            <button
+              onClick={onCancel}
+              className="hover:bg-white/20 rounded p-1 transition-colors"
+              aria-label="Cancel"
+            >
+              ✕
+            </button>
+          )}
+        </div>
       </div>
 
       {/* Messages */}

@@ -43,16 +43,38 @@ export function canManageUsers(user: User | null): boolean {
 }
 
 /**
- * Check if user can view reports (admin or superuser)
+ * Check if user is viewer (read-only access)
+ */
+export function isViewer(user: User | null): boolean {
+  if (!user) return false;
+  if (user.isActive === false) return false;
+  return user.role === 'viewer';
+}
+
+/**
+ * Check if user can view reports (admin, superuser, or viewer)
  */
 export function canViewReports(user: User | null): boolean {
+  if (!user) return false;
+  if (user.isActive === false) return false;
+  return user.role === 'admin' || user.role === 'superuser' || user.role === 'viewer';
+}
+
+/**
+ * Check if user can access admin pages (admin or superuser only - viewers cannot manage)
+ */
+export function canAccessAdminPages(user: User | null): boolean {
   return isAdminOrSuperuser(user);
 }
 
 /**
- * Check if user can access admin pages (admin or superuser)
+ * Check if user can edit data (not viewers)
  */
-export function canAccessAdminPages(user: User | null): boolean {
-  return isAdminOrSuperuser(user);
+export function canEditData(user: User | null): boolean {
+  if (!user) return false;
+  if (user.isActive === false) return false;
+  // Viewers cannot edit anything
+  if (user.role === 'viewer') return false;
+  return true;
 }
 

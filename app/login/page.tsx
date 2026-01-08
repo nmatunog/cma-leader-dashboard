@@ -22,7 +22,7 @@ export default function LoginPage() {
   // Redirect if already logged in
   useEffect(() => {
     if (!loading && user) {
-      if (user.role === 'admin' || user.role === 'superuser') {
+      if (user.role === 'admin' || user.role === 'superuser' || user.role === 'viewer') {
         router.push('/reports');
       } else {
         router.push('/strategic-planning');
@@ -52,7 +52,7 @@ export default function LoginPage() {
         }
         
         // Redirect based on role
-        if (result.user.role === 'admin' || result.user.role === 'superuser') {
+        if (result.user.role === 'admin' || result.user.role === 'superuser' || result.user.role === 'viewer') {
           router.push('/reports');
         } else {
           router.push('/strategic-planning');
@@ -258,10 +258,21 @@ export default function LoginPage() {
                   'Login'
                 )}
               </button>
-              <p className="text-center text-sm text-slate-600 mt-4">
+              <div className="flex items-center gap-4 mt-4">
+                <div className="flex-1 border-t border-slate-200"></div>
+                <span className="text-sm text-slate-500">or</span>
+                <div className="flex-1 border-t border-slate-200"></div>
+              </div>
+              <a
+                href="/signup"
+                className="w-full p-3.5 bg-white border-2 border-[#D31145] text-[#D31145] font-bold rounded-xl hover:bg-[#D31145] hover:text-white transition-all shadow-sm hover:shadow-md flex items-center justify-center gap-2"
+              >
+                Sign Up
+              </a>
+              <p className="text-center text-sm text-slate-600 mt-2">
                 Don't have an account?{' '}
                 <a href="/signup" className="text-[#D31145] font-semibold hover:underline">
-                  Sign up
+                  Create one here
                 </a>
               </p>
             </form>

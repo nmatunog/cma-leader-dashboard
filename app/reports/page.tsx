@@ -110,7 +110,7 @@ export default function ReportsPage() {
     }
   };
 
-  // Check authorization - allow ADMIN, ADD, SUM, UM
+  // Check authorization - allow ADMIN, ADD, SUM, UM, VIEWER
   useEffect(() => {
     if (!authLoading) {
       if (!user) {
@@ -118,7 +118,8 @@ export default function ReportsPage() {
         return;
       }
       
-      const allowedRanks = ['ADMIN', 'ADD', 'SUM', 'UM'];
+      // Allow reports access for admins, leaders (ADD, SUM, UM), and viewers
+      const allowedRanks = ['ADMIN', 'ADD', 'SUM', 'UM', 'VIEWER'];
       
       if (!allowedRanks.includes(user.rank)) {
         router.push('/login');

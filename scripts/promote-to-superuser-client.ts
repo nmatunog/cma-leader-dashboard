@@ -64,4 +64,3 @@ export async function promoteToSuperuserClient(): Promise<{ success: boolean; er
     };
   }
 }
-

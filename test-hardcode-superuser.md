@@ -49,4 +49,3 @@ If the API call fails:
 - Check server logs for detailed error information
 - Verify Firebase is properly configured
 - Verify the user nmatunog@gmail.com exists in Firestore
-

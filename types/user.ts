@@ -4,8 +4,8 @@
 
 import { Timestamp } from 'firebase/firestore';
 
-export type UserRole = 'superuser' | 'admin' | 'leader' | 'advisor';
-export type UserRank = 'ADMIN' | 'ADD' | 'SUM' | 'UM' | 'AUM' | 'ADV';
+export type UserRole = 'superuser' | 'admin' | 'leader' | 'advisor' | 'viewer';
+export type UserRank = 'ADMIN' | 'ADD' | 'SUM' | 'UM' | 'AUM' | 'ADV' | 'VIEWER';
 
 export interface User {
   uid: string;                    // Firebase Auth UID (document ID)

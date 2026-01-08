@@ -97,4 +97,3 @@ After setup, test the Activity Planning feature:
 - Add payment method if needed (even for pay-as-you-go)
 - Verify you have credits available
 
-

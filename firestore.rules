@@ -12,6 +12,14 @@ service cloud.firestore {
              (get(/databases/$(database)/documents/users/$(request.auth.uid)).data.isActive != false);
     }
     
+    // Helper function to check if current user is viewer (read-only access)
+    // Only use AFTER user can read their own document (no circular dependency)
+    function isViewer() {
+      return request.auth != null &&
+             exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
+             get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'viewer' &&
+             (get(/databases/$(database)/documents/users/$(request.auth.uid)).data.isActive != false);
+    }
     // Helper function to check if current user is superuser
     function isSuperuser() {
       return request.auth != null && 
@@ -34,8 +42,8 @@ service cloud.firestore {
       // This must come before admin checks to avoid circular dependency
       allow read: if request.auth != null && request.auth.uid == userId;
       
-      // Admins can read all users
-      allow read: if isAdmin();
+      // Admins and viewers can read all users (viewers have read-only access)
+      allow read: if isAdmin() || isViewer();
       
       // Allow users to create their own user document (for self-signup)
       // Allow setup page to create first admin (request.auth == null for initial setup)
@@ -78,6 +86,8 @@ service cloud.firestore {
       // Admins can read/write all goals
       allow read, write: if isAdmin() && isActive();
       
+      // Viewers can read all goals (read-only access)
+      allow read: if isViewer() && isActive();
       // On create, ensure userId matches authenticated user (unless admin)
       allow create: if request.auth != null && 
                     isActive() &&
@@ -86,10 +96,10 @@ service cloud.firestore {
     
     // Data collection (dashboard data)
     match /data/{document=**} {
-      // Only authenticated users can read
+      // Authenticated users and viewers can read
       allow read: if request.auth != null && isActive();
       
-      // Only admins can write
+      // Only admins can write (viewers cannot edit)
       allow write: if isAdmin() && isActive();
     }
     
@@ -118,5 +128,3 @@ service cloud.firestore {
     }
   }
 }
-
-

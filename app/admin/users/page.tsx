@@ -587,10 +587,11 @@ export default function AdminUsersPage() {
                           <span className={`px-2 py-1 rounded text-xs font-semibold ${
                             user.role === 'superuser' ? 'bg-gradient-to-r from-purple-500 to-pink-500 text-white' :
                             user.role === 'admin' ? 'bg-purple-100 text-purple-800' :
+                            user.role === 'viewer' ? 'bg-amber-100 text-amber-800' :
                             user.role === 'leader' ? 'bg-blue-100 text-blue-800' :
                             'bg-green-100 text-green-800'
                           }`}>
-                            {user.role === 'superuser' ? '⭐ SUPER USER' : user.role.toUpperCase()}
+                            {user.role === 'superuser' ? '⭐ SUPER USER' : user.role === 'viewer' ? '👁️ VIEWER' : user.role.toUpperCase()}
                           </span>
                         </td>
                         <td className="p-4">{user.rank}</td>
@@ -986,7 +987,9 @@ function UserCreateModal({
                   setFormData({
                     ...formData,
                     role,
-                    rank: (role === 'admin' || role === 'superuser') ? 'ADMIN' : role === 'leader' ? 'UM' : 'ADV',
+                    rank: (role === 'admin' || role === 'superuser') ? 'ADMIN' :
+                          role === 'viewer' ? 'VIEWER' :
+                          role === 'leader' ? 'UM' : 'ADV',
                   });
                 }}
                 className="w-full p-2 border-2 border-slate-200 rounded-lg focus:border-[#D31145] focus:ring-2 focus:ring-[#D31145]/20"
@@ -994,6 +997,7 @@ function UserCreateModal({
               >
                 <option value="advisor">Advisor</option>
                 <option value="leader">Leader</option>
+                <option value="viewer">Viewer (Read-Only)</option>
                 {isSuperuser && (
                   <>
                     <option value="admin">Admin</option>
@@ -1008,12 +1012,14 @@ function UserCreateModal({
               <select
                 value={formData.rank}
                 onChange={(e) => setFormData({ ...formData, rank: e.target.value as UserRank })}
-                disabled={formData.role === 'admin' || formData.role === 'superuser'}
+                disabled={formData.role === 'admin' || formData.role === 'superuser' || formData.role === 'viewer'}
                 className="w-full p-2 border-2 border-slate-200 rounded-lg focus:border-[#D31145] focus:ring-2 focus:ring-[#D31145]/20 disabled:bg-slate-100"
                 required
               >
                 {(formData.role === 'admin' || formData.role === 'superuser') ? (
                   <option value="ADMIN">ADMIN</option>
+                ) : formData.role === 'viewer' ? (
+                  <option value="VIEWER">VIEWER</option>
                 ) : formData.role === 'leader' ? (
                   <>
                     <option value="ADD">Agency/District Director</option>
@@ -1200,6 +1206,8 @@ function UserEditModal({
                   let newRank: UserRank = formData.rank;
                   if (role === 'admin' || role === 'superuser') {
                     newRank = 'ADMIN';
+                  } else if (role === 'viewer') {
+                    newRank = 'VIEWER';
                   } else if (role === 'leader') {
                     // If currently an advisor (ADV), promote to AUM
                     if (user.role === 'advisor' && user.rank === 'ADV') {
@@ -1226,6 +1234,7 @@ function UserEditModal({
               >
                 <option value="advisor">Advisor</option>
                 <option value="leader">Leader</option>
+                <option value="viewer">Viewer (Read-Only)</option>
                 {isSuperuser && (
                   <>
                     <option value="admin">Admin</option>
@@ -1245,12 +1254,14 @@ function UserEditModal({
               <select
                 value={formData.rank}
                 onChange={(e) => setFormData({ ...formData, rank: e.target.value as UserRank })}
-                disabled={formData.role === 'admin' || formData.role === 'superuser'}
+                disabled={formData.role === 'admin' || formData.role === 'superuser' || formData.role === 'viewer'}
                 className="w-full p-2 border-2 border-slate-200 rounded-lg focus:border-[#D31145] focus:ring-2 focus:ring-[#D31145]/20 disabled:bg-slate-100"
                 required
               >
                 {(formData.role === 'admin' || formData.role === 'superuser') ? (
                   <option value="ADMIN">ADMIN</option>
+                ) : formData.role === 'viewer' ? (
+                  <option value="VIEWER">VIEWER</option>
                 ) : formData.role === 'leader' ? (
                   <>
                     <option value="ADD">Agency/District Director</option>
@@ -1278,7 +1289,8 @@ function UserEditModal({
                 required
               >
                 <option value="">Select Agency</option>
-                {(isSuperuser || formData.role === 'admin' || formData.role === 'superuser') && (
+                {/* Show "No Agency" option if: user is admin/superuser OR user already has "No Agency" (allows reassigning) */}
+                {((isSuperuser || formData.role === 'admin' || formData.role === 'superuser') || user.agencyName === 'No Agency') && (
                   <option value="No Agency">No Agency</option>
                 )}
                 {agencies.map(agency => (
