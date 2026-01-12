@@ -4,12 +4,11 @@ import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { Sidebar } from '@/components/sidebar';
 import { getAllGoals, getAgencyGoals, getGoalsForSUM, getGoalsForADD, getUnitGoals, type StrategicPlanningGoal } from '@/services/strategic-planning-service';
-import { getAllSUMsInAgency, getUnitsUnderSUM, getUnitsByAgency, getHierarchyByAgency, getUnitsUnderADD } from '@/services/organizational-hierarchy-service';
 import { formatNumberWithCommas } from '@/components/strategic-planning/utils/number-format';
 import { getCanonicalAgencyName, areAgencyNamesEqual } from '@/lib/utils/agency-name-normalizer';
 import { formatDisplayName } from '@/lib/utils/name-formatter';
 import { getCanonicalName } from '@/lib/utils/name-canonicalizer';
-import { getAllUsers } from '@/lib/user-service';
+import { getAllUsers, getSUMsInAgencyFromUsers, getUMsUnderSUMFromUsers, getUMsUnderADDFromUsers, getUnitsByAgencyFromUsers } from '@/lib/user-service';
 import { useAuth } from '@/contexts/auth-context';
 
 interface QuarterlyData {
@@ -164,8 +163,8 @@ export default function ReportsPage() {
     if (!user || user.rank !== 'ADD' || !user.agencyName) return;
     
     try {
-      // Load SUM list
-      const sums = await getAllSUMsInAgency(user.agencyName);
+      // Load SUM list from Users collection (source of truth)
+      const sums = await getSUMsInAgencyFromUsers(user.agencyName);
       setAvailableSUMs(sums.map(sum => sum.name));
       
       // Load units based on SUM filter
@@ -181,12 +180,12 @@ export default function ReportsPage() {
     
     try {
       if (filterSUM !== 'all') {
-        // Get units under selected SUM
-        const umNames = await getUnitsUnderSUM(filterSUM, user.agencyName);
+        // Get units under selected SUM from Users collection (source of truth)
+        const umNames = await getUMsUnderSUMFromUsers(filterSUM, user.agencyName);
         setAvailableUnitsForSUM(umNames.map(umName => `${umName}_${user.agencyName}`));
       } else {
-        // Get all units in agency
-        const allUnits = await getUnitsByAgency(user.agencyName);
+        // Get all units in agency from Users collection (source of truth)
+        const allUnits = await getUnitsByAgencyFromUsers(user.agencyName);
         setAvailableUnitsForSUM(allUnits.map(umName => `${umName}_${user.agencyName}`));
       }
     } catch (err) {
@@ -267,10 +266,10 @@ export default function ReportsPage() {
         // Get unique agencies from goals
         const agencies = Array.from(new Set(goals.map(g => g.agencyName)));
         
-        // For each agency, get UMs under the selected SUM
+        // For each agency, get UMs under the selected SUM from Users collection (source of truth)
         for (const agency of agencies) {
           try {
-            const ums = await getUnitsUnderSUM(filterSUM, agency);
+            const ums = await getUMsUnderSUMFromUsers(filterSUM, agency);
             if (ums.length > 0) {
               units.push(...ums);
             }
@@ -310,13 +309,13 @@ export default function ReportsPage() {
         // Get unique agencies from goals
         const agencies = Array.from(new Set(goals.map(g => g.agencyName)));
         
-        // For each agency, get SUMs and ADDs, then get their UMs
+        // For each agency, get SUMs and ADDs, then get their UMs from Users collection (source of truth)
         for (const agency of agencies) {
           try {
-            // Get all SUMs in agency
-            const sums = await getAllSUMsInAgency(agency);
+            // Get all SUMs in agency from Users collection (source of truth)
+            const sums = await getSUMsInAgencyFromUsers(agency);
             for (const sum of sums) {
-              const ums = await getUnitsUnderSUM(sum.name, agency);
+              const ums = await getUMsUnderSUMFromUsers(sum.name, agency);
               if (ums.length > 0) {
                 const existing = sumMap.get(sum.name) || [];
                 sumMap.set(sum.name, [...existing, ...ums]);
@@ -338,10 +337,10 @@ export default function ReportsPage() {
               }
             });
             
-            // Get UMs under each ADD
+            // Get UMs under each ADD from Users collection (source of truth)
             for (const addName of addNames) {
               try {
-                const ums = await getUnitsUnderADD(addName, agency);
+                const ums = await getUMsUnderADDFromUsers(addName, agency);
                 if (ums.length > 0) {
                   const existing = addMap.get(addName) || [];
                   addMap.set(addName, [...existing, ...ums]);
@@ -357,7 +356,7 @@ export default function ReportsPage() {
         
         setSumToUMsMap(sumMap);
         setAddToUMsMap(addMap);
-        console.log('[ReportsPage] Loaded hierarchy maps:', {
+        console.log('[ReportsPage] Loaded hierarchy maps from Users collection:', {
           sumMapSize: sumMap.size,
           addMapSize: addMap.size,
           sumMapEntries: Array.from(sumMap.entries()).map(([sum, ums]) => [sum, ums.length]),

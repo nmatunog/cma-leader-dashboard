@@ -540,3 +540,216 @@ export function getUserPermissions(role: UserRole) {
     canViewAllAgencies: role === 'admin' || role === 'superuser',
   };
 }
+
+/**
+ * Get all SUMs in an agency from Users collection
+ * Uses Users collection as source of truth for hierarchy
+ */
+export async function getSUMsInAgencyFromUsers(agencyName: string): Promise<User[]> {
+  try {
+    if (!db) {
+      console.warn('Firestore db is not available');
+      return [];
+    }
+
+    const canonicalAgencyName = getCanonicalAgencyName(agencyName);
+    
+    // Get all users with rank SUM in this agency
+    const q = query(
+      collection(db, USERS_COLLECTION),
+      where('rank', '==', 'SUM'),
+      where('isActive', '==', true),
+      orderBy('name', 'asc')
+    );
+    
+    const querySnapshot = await getDocs(q);
+    const sums: User[] = [];
+    
+    querySnapshot.forEach((docSnap) => {
+      const data = docSnap.data() as Omit<User, 'uid'>;
+      const user: User = {
+        uid: docSnap.id,
+        ...data,
+      };
+      
+      // Filter by agency name (case-insensitive comparison)
+      const userAgencyName = getCanonicalAgencyName(user.agencyName);
+      if (userAgencyName === canonicalAgencyName) {
+        sums.push(user);
+      }
+    });
+    
+    return sums;
+  } catch (error) {
+    console.error('Error getting SUMs in agency from Users:', error);
+    return [];
+  }
+}
+
+/**
+ * Get all UMs (Unit Managers) under a specific SUM from Users collection
+ * Uses Users collection as source of truth for hierarchy
+ */
+export async function getUMsUnderSUMFromUsers(sumName: string, agencyName: string): Promise<string[]> {
+  try {
+    if (!db) {
+      console.warn('Firestore db is not available');
+      return [];
+    }
+
+    const canonicalAgencyName = getCanonicalAgencyName(agencyName);
+    const canonicalSumName = getCanonicalName(sumName);
+    
+    // Get all users with rank UM in this agency
+    const q = query(
+      collection(db, USERS_COLLECTION),
+      where('rank', '==', 'UM'),
+      where('isActive', '==', true),
+      orderBy('name', 'asc')
+    );
+    
+    const querySnapshot = await getDocs(q);
+    const ums: string[] = [];
+    
+    querySnapshot.forEach((docSnap) => {
+      const data = docSnap.data() as Omit<User, 'uid'>;
+      const user: User = {
+        uid: docSnap.id,
+        ...data,
+      };
+      
+      // Filter by agency name (case-insensitive comparison)
+      const userAgencyName = getCanonicalAgencyName(user.agencyName);
+      if (userAgencyName === canonicalAgencyName) {
+        // Check if this UM reports to the specified SUM
+        // UMs report to SUMs via unitManager field
+        const userUnitManager = getCanonicalName(user.unitManager || '');
+        if (userUnitManager === canonicalSumName) {
+          ums.push(user.name);
+        }
+      }
+    });
+    
+    return ums.sort();
+  } catch (error) {
+    console.error('Error getting UMs under SUM from Users:', error);
+    return [];
+  }
+}
+
+/**
+ * Get all UMs (Unit Managers) under a specific ADD from Users collection
+ * Uses Users collection as source of truth for hierarchy
+ */
+export async function getUMsUnderADDFromUsers(addName: string, agencyName: string): Promise<string[]> {
+  try {
+    if (!db) {
+      console.warn('Firestore db is not available');
+      return [];
+    }
+
+    const canonicalAgencyName = getCanonicalAgencyName(agencyName);
+    const canonicalAddName = getCanonicalName(addName);
+    
+    // Get all users with rank UM in this agency
+    const q = query(
+      collection(db, USERS_COLLECTION),
+      where('rank', '==', 'UM'),
+      where('isActive', '==', true),
+      orderBy('name', 'asc')
+    );
+    
+    const querySnapshot = await getDocs(q);
+    const ums: string[] = [];
+    
+    querySnapshot.forEach((docSnap) => {
+      const data = docSnap.data() as Omit<User, 'uid'>;
+      const user: User = {
+        uid: docSnap.id,
+        ...data,
+      };
+      
+      // Filter by agency name (case-insensitive comparison)
+      const userAgencyName = getCanonicalAgencyName(user.agencyName);
+      if (userAgencyName === canonicalAgencyName) {
+        // Check if this UM reports to the specified ADD
+        // UMs report to ADDs via unitManager field
+        const userUnitManager = getCanonicalName(user.unitManager || '');
+        if (userUnitManager === canonicalAddName) {
+          ums.push(user.name);
+        }
+      }
+    });
+    
+    return ums.sort();
+  } catch (error) {
+    console.error('Error getting UMs under ADD from Users:', error);
+    return [];
+  }
+}
+
+/**
+ * Get all units (UM names) in an agency from Users collection
+ * Uses Users collection as source of truth for hierarchy
+ */
+export async function getUnitsByAgencyFromUsers(agencyName: string): Promise<string[]> {
+  try {
+    if (!db) {
+      console.warn('Firestore db is not available');
+      return [];
+    }
+
+    const canonicalAgencyName = getCanonicalAgencyName(agencyName);
+    
+    // Get all users with rank UM in this agency
+    const q = query(
+      collection(db, USERS_COLLECTION),
+      where('rank', '==', 'UM'),
+      where('isActive', '==', true),
+      orderBy('name', 'asc')
+    );
+    
+    const querySnapshot = await getDocs(q);
+    const units = new Set<string>();
+    
+    querySnapshot.forEach((docSnap) => {
+      const data = docSnap.data() as Omit<User, 'uid'>;
+      const user: User = {
+        uid: docSnap.id,
+        ...data,
+      };
+      
+      // Filter by agency name (case-insensitive comparison)
+      const userAgencyName = getCanonicalAgencyName(user.agencyName);
+      if (userAgencyName === canonicalAgencyName) {
+        units.add(user.name);
+      }
+    });
+    
+    // Also include SUMs and ADDs as units (they manage their own units)
+    const leadersQ = query(
+      collection(db, USERS_COLLECTION),
+      where('isActive', '==', true),
+      orderBy('name', 'asc')
+    );
+    
+    const leadersSnapshot = await getDocs(leadersQ);
+    leadersSnapshot.forEach((docSnap) => {
+      const data = docSnap.data() as Omit<User, 'uid'>;
+      const user: User = {
+        uid: docSnap.id,
+        ...data,
+      };
+      
+      const userAgencyName = getCanonicalAgencyName(user.agencyName);
+      if (userAgencyName === canonicalAgencyName && (user.rank === 'SUM' || user.rank === 'ADD')) {
+        units.add(user.name);
+      }
+    });
+    
+    return Array.from(units).sort();
+  } catch (error) {
+    console.error('Error getting units by agency from Users:', error);
+    return [];
+  }
+}
