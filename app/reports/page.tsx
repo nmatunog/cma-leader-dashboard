@@ -3,11 +3,14 @@
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { Sidebar } from '@/components/sidebar';
-import { getAllGoals, getAgencyGoals, getGoalsForSUM, getUnitGoals, type StrategicPlanningGoal } from '@/services/strategic-planning-service';
-import { getAllSUMsInAgency, getUnitsUnderSUM, getUnitsByAgency } from '@/services/organizational-hierarchy-service';
+import { getAllGoals, getAgencyGoals, getGoalsForSUM, getGoalsForADD, getUnitGoals, type StrategicPlanningGoal } from '@/services/strategic-planning-service';
+import { getAllSUMsInAgency, getUnitsUnderSUM, getUnitsByAgency, getHierarchyByAgency, getUnitsUnderADD } from '@/services/organizational-hierarchy-service';
 import { formatNumberWithCommas } from '@/components/strategic-planning/utils/number-format';
-import { useAuth } from '@/contexts/auth-context';
+import { getCanonicalAgencyName, areAgencyNamesEqual } from '@/lib/utils/agency-name-normalizer';
 import { formatDisplayName } from '@/lib/utils/name-formatter';
+import { getCanonicalName } from '@/lib/utils/name-canonicalizer';
+import { getAllUsers } from '@/lib/user-service';
+import { useAuth } from '@/contexts/auth-context';
 
 interface QuarterlyData {
   baseManpower: number;
@@ -27,7 +30,19 @@ interface AggregatedData {
   avgMonthlyIncome: number;
   byAgency: Record<string, {
     count: number;
-    manpower: number;
+    beginningManpowerBase: number;
+    endManpower: number;
+    newRecruits: number;
+    fyp: number;
+    fyc: number;
+    income: number;
+  }>;
+  bySUM: Record<string, {
+    sumName: string;
+    agencyName: string;
+    count: number;
+    beginningManpowerBase: number;
+    endManpower: number;
     newRecruits: number;
     fyp: number;
     fyc: number;
@@ -37,7 +52,8 @@ interface AggregatedData {
     unitManager: string;
     agencyName: string;
     count: number;
-    manpower: number;
+    beginningManpowerBase: number;
+    endManpower: number;
     newRecruits: number;
     fyp: number;
     fyc: number;
@@ -74,6 +90,74 @@ export default function ReportsPage() {
   const [showQuarterlySummary, setShowQuarterlySummary] = useState(false);
   const [availableSUMs, setAvailableSUMs] = useState<string[]>([]);
   const [availableUnitsForSUM, setAvailableUnitsForSUM] = useState<string[]>([]);
+  const [sumToUMsMap, setSumToUMsMap] = useState<Map<string, string[]>>(new Map()); // Cache: SUM name -> list of UM names
+  const [addToUMsMap, setAddToUMsMap] = useState<Map<string, string[]>>(new Map()); // Cache: ADD name -> list of UM names (direct reporting)
+  const [userRankMap, setUserRankMap] = useState<Map<string, string>>(new Map()); // Cache: userName -> rank (from user records, source of truth)
+  
+  // State for accordion expansion
+  const [expandedAgencies, setExpandedAgencies] = useState<Set<string>>(new Set()); // Track expanded agencies
+  const [expandedSUMs, setExpandedSUMs] = useState<Map<string, Set<string>>>(new Map()); // Track expanded SUMs per agency
+  const [expandedUnits, setExpandedUnits] = useState<Map<string, Set<string>>>(new Map()); // Track expanded units per SUM
+  const [showSummaryByUnit, setShowSummaryByUnit] = useState<boolean>(false); // Track Summary by Unit section visibility
+  
+  // Helper functions for accordion state
+  const toggleAgency = (agencyName: string) => {
+    setExpandedAgencies(prev => {
+      const next = new Set(prev);
+      if (next.has(agencyName)) {
+        next.delete(agencyName);
+      } else {
+        next.add(agencyName);
+      }
+      return next;
+    });
+  };
+  
+  const toggleSUM = (agencyName: string, sumKey: string) => {
+    setExpandedSUMs(prev => {
+      const next = new Map(prev);
+      const agencySUMs = next.get(agencyName) || new Set<string>();
+      const newAgencySUMs = new Set(agencySUMs);
+      if (newAgencySUMs.has(sumKey)) {
+        newAgencySUMs.delete(sumKey);
+      } else {
+        newAgencySUMs.add(sumKey);
+      }
+      next.set(agencyName, newAgencySUMs);
+      return next;
+    });
+  };
+  
+  const toggleUnit = (sumKey: string, unitKey: string) => {
+    setExpandedUnits(prev => {
+      const next = new Map(prev);
+      const sumUnits = next.get(sumKey) || new Set<string>();
+      const newSumUnits = new Set(sumUnits);
+      if (newSumUnits.has(unitKey)) {
+        newSumUnits.delete(unitKey);
+      } else {
+        newSumUnits.add(unitKey);
+      }
+      next.set(sumKey, newSumUnits);
+      return next;
+    });
+  };
+  
+  const isAgencyExpanded = (agencyName: string) => expandedAgencies.has(agencyName);
+  const isSUMExpanded = (agencyName: string, sumKey: string) => (expandedSUMs.get(agencyName) || new Set()).has(sumKey);
+  const isUnitExpanded = (sumKey: string, unitKey: string) => (expandedUnits.get(sumKey) || new Set()).has(unitKey);
+  
+  // Helper function to calculate summary metrics for a set of goals
+  const calculateUnitMetrics = (goals: StrategicPlanningGoal[]) => {
+    const annualNewRecruits = goals.reduce((sum, goal) => {
+      return sum + (goal.q1?.newRecruits || 0) + (goal.q2?.newRecruits || 0) + 
+             (goal.q3?.newRecruits || 0) + (goal.q4?.newRecruits || 0);
+    }, 0);
+    const totalFYP = goals.reduce((sum, goal) => sum + goal.annualFYP, 0);
+    const totalFYC = goals.reduce((sum, goal) => sum + goal.annualFYC, 0);
+    const totalIncome = goals.reduce((sum, goal) => sum + goal.annualIncome, 0);
+    return { count: goals.length, newRecruits: annualNewRecruits, fyp: totalFYP, fyc: totalFYC, income: totalIncome };
+  };
 
   // Load filter options for ADD users
   const loadFilterOptions = async () => {
@@ -110,7 +194,7 @@ export default function ReportsPage() {
     }
   };
 
-  // Check authorization - allow ADMIN, ADD, SUM, UM, VIEWER
+  // Check authorization - allow ADMIN, ADD, SUM, UM
   useEffect(() => {
     if (!authLoading) {
       if (!user) {
@@ -118,8 +202,7 @@ export default function ReportsPage() {
         return;
       }
       
-      // Allow reports access for admins, leaders (ADD, SUM, UM), and viewers
-      const allowedRanks = ['ADMIN', 'ADD', 'SUM', 'UM', 'VIEWER'];
+      const allowedRanks = ['ADMIN', 'ADD', 'SUM', 'UM'];
       
       if (!allowedRanks.includes(user.rank)) {
         router.push('/login');
@@ -131,9 +214,30 @@ export default function ReportsPage() {
         loadFilterOptions();
       }
       
+      // Load user records to get accurate rank information (source of truth)
+      loadUserRanks();
+      
       loadGoals();
     }
   }, [user, authLoading, router]);
+  
+  // Load user ranks from user records (source of truth, not from goals)
+  const loadUserRanks = async () => {
+    try {
+      const allUsers = await getAllUsers();
+      const rankMap = new Map<string, string>();
+      allUsers.forEach(user => {
+        if (user.name && user.rank) {
+          rankMap.set(user.name, user.rank);
+        }
+      });
+      setUserRankMap(rankMap);
+      const sumNames = Array.from(rankMap.entries()).filter(([_, rank]) => rank === 'SUM').map(([name]) => name);
+      console.log('[ReportsPage] Loaded user ranks. SUMs found:', sumNames);
+    } catch (err) {
+      console.error('Error loading user ranks:', err);
+    }
+  };
 
   // Reload goals when filters change for ADD users
   useEffect(() => {
@@ -142,11 +246,141 @@ export default function ReportsPage() {
     }
   }, [filterSUM, filterUnit]);
 
+  // Reload goals when filters change for ADMIN users
   useEffect(() => {
-    if (goals.length > 0) {
+    if (user && (user.role === 'admin' || user.rank === 'ADMIN') && !authLoading && !loading) {
+      loadGoals();
+    }
+  }, [filterSUM, filterAgency]);
+
+  // Load UMs under SUM when SUM filter changes (for client-side filtering only - doesn't affect Individual Reports)
+  // Note: This is only used for populating availableUnitsForSUM filter dropdown, not for Individual Reports grouping
+  useEffect(() => {
+    const loadUMsUnderSUM = async () => {
+      if (filterSUM === 'all' || !goals.length) {
+        setAvailableUnitsForSUM([]);
+        return;
+      }
+
+      try {
+        const units: string[] = [];
+        // Get unique agencies from goals
+        const agencies = Array.from(new Set(goals.map(g => g.agencyName)));
+        
+        // For each agency, get UMs under the selected SUM
+        for (const agency of agencies) {
+          try {
+            const ums = await getUnitsUnderSUM(filterSUM, agency);
+            if (ums.length > 0) {
+              units.push(...ums);
+            }
+          } catch (err) {
+            console.error(`Error loading UMs under SUM ${filterSUM} for agency ${agency}:`, err);
+          }
+        }
+        
+        setAvailableUnitsForSUM([...new Set(units)]); // Remove duplicates
+      } catch (err) {
+        console.error('Error loading UMs under SUM:', err);
+        setAvailableUnitsForSUM([]);
+      }
+    };
+
+    // Only load if we're doing client-side filtering (admin with SUM filter but no agency filter)
+    if ((user?.role === 'admin' || user?.rank === 'ADMIN') && filterSUM !== 'all' && filterAgency === 'all') {
+      loadUMsUnderSUM();
+    } else {
+      setAvailableUnitsForSUM([]);
+    }
+  }, [filterSUM, filterAgency, goals, user]);
+
+  // Load SUM -> UMs and ADD -> UMs maps for all agencies when goals are loaded (for Individual Reports grouping)
+  useEffect(() => {
+    const loadHierarchyMaps = async () => {
+      if (!goals.length || userRankMap.size === 0) {
+        setSumToUMsMap(new Map());
+        setAddToUMsMap(new Map());
+        return;
+      }
+
+      try {
+        const sumMap = new Map<string, string[]>();
+        const addMap = new Map<string, string[]>();
+        
+        // Get unique agencies from goals
+        const agencies = Array.from(new Set(goals.map(g => g.agencyName)));
+        
+        // For each agency, get SUMs and ADDs, then get their UMs
+        for (const agency of agencies) {
+          try {
+            // Get all SUMs in agency
+            const sums = await getAllSUMsInAgency(agency);
+            for (const sum of sums) {
+              const ums = await getUnitsUnderSUM(sum.name, agency);
+              if (ums.length > 0) {
+                const existing = sumMap.get(sum.name) || [];
+                sumMap.set(sum.name, [...existing, ...ums]);
+              }
+            }
+            
+            // Get all ADDs in agency (from userRankMap)
+            const addNames: string[] = [];
+            userRankMap.forEach((rank, userName) => {
+              if (rank === 'ADD') {
+                // Check if this ADD is in this agency (by checking if they have goals in this agency)
+                const hasGoalsInAgency = goals.some(g => 
+                  getCanonicalAgencyName(g.agencyName) === getCanonicalAgencyName(agency) && 
+                  g.userName === userName
+                );
+                if (hasGoalsInAgency) {
+                  addNames.push(userName);
+                }
+              }
+            });
+            
+            // Get UMs under each ADD
+            for (const addName of addNames) {
+              try {
+                const ums = await getUnitsUnderADD(addName, agency);
+                if (ums.length > 0) {
+                  const existing = addMap.get(addName) || [];
+                  addMap.set(addName, [...existing, ...ums]);
+                }
+              } catch (err) {
+                console.error(`Error loading UMs under ADD ${addName} for agency ${agency}:`, err);
+              }
+            }
+          } catch (err) {
+            console.error(`Error loading hierarchy for agency ${agency}:`, err);
+          }
+        }
+        
+        setSumToUMsMap(sumMap);
+        setAddToUMsMap(addMap);
+        console.log('[ReportsPage] Loaded hierarchy maps:', {
+          sumMapSize: sumMap.size,
+          addMapSize: addMap.size,
+          sumMapEntries: Array.from(sumMap.entries()).map(([sum, ums]) => [sum, ums.length]),
+          addMapEntries: Array.from(addMap.entries()).map(([add, ums]) => [add, ums.length]),
+        });
+      } catch (err) {
+        console.error('Error loading hierarchy maps:', err);
+        setSumToUMsMap(new Map());
+        setAddToUMsMap(new Map());
+      }
+    };
+
+    // Load hierarchy maps when goals and user ranks are available
+    if (goals.length > 0 && userRankMap.size > 0) {
+      loadHierarchyMaps();
+    }
+  }, [goals, userRankMap]);
+
+  useEffect(() => {
+    if (goals.length > 0 && userRankMap.size > 0) {
       calculateAggregates();
     }
-  }, [goals, filterAgency, filterRank, filterUnit, filterSUM]);
+  }, [goals, filterAgency, filterRank, filterUnit, filterSUM, sumToUMsMap, userRankMap]);
 
   // Update available units when SUM filter changes
   useEffect(() => {
@@ -168,22 +402,70 @@ export default function ReportsPage() {
       setError(null);
       let loadedGoals: StrategicPlanningGoal[] = [];
       
-      if (user.role === 'admin' || user.role === 'superuser' || user.rank === 'ADMIN') {
-        // Admin: Get all goals
-        loadedGoals = await getAllGoals();
+      if (user.role === 'admin' || user.rank === 'ADMIN') {
+        // Admin: Handle filters (Overall, By Agency, By SUM)
+        if (filterSUM !== 'all') {
+          if (filterAgency !== 'all') {
+            // Filter by SUM and Agency - use getGoalsForSUM
+            loadedGoals = await getGoalsForSUM(filterSUM, filterAgency);
+          } else {
+            // Filter by SUM only - need to find SUM's agency from goals first
+            // Load all goals temporarily to find SUM's agency
+            const allGoalsTemp = await getAllGoals();
+            // Verify SUM from user records, not goal.userRank
+            const isSUM = userRankMap.get(filterSUM) === 'SUM';
+            const sumGoal = isSUM ? allGoalsTemp.find(g => g.userName === filterSUM) : null;
+            if (sumGoal && sumGoal.agencyName) {
+              // Use getGoalsForSUM with the SUM's agency
+              loadedGoals = await getGoalsForSUM(filterSUM, sumGoal.agencyName);
+            } else {
+              // SUM not found in goals, return empty array
+              console.warn(`SUM "${filterSUM}" not found in goals`);
+              loadedGoals = [];
+            }
+          }
+        } else if (filterAgency !== 'all') {
+          // Filter by Agency only
+          loadedGoals = await getAgencyGoals(filterAgency);
+        } else {
+          // Get all goals
+          loadedGoals = await getAllGoals();
+        }
       } else if (user.rank === 'ADD') {
         // ADD: Handle filters (Overall, By SUM, By Unit)
+        console.log(`[ReportsPage] ADD user "${user.name}" (email: ${user.email}) loading goals`);
+        console.log(`[ReportsPage] ADD agency: "${user.agencyName}"`);
+        console.log(`[ReportsPage] ADD filters - SUM: "${filterSUM}", Unit: "${filterUnit}"`);
+        
         if (filterSUM !== 'all' && filterUnit === 'all') {
-          // Filter by SUM only
+          // Filter by SUM only - get goals for this specific SUM
+          console.log(`[ReportsPage] ADD filtering by SUM: "${filterSUM}"`);
           loadedGoals = await getGoalsForSUM(filterSUM, user.agencyName);
+          console.log(`[ReportsPage] ADD loaded ${loadedGoals.length} goals for SUM "${filterSUM}"`);
         } else if (filterUnit !== 'all') {
-          // Filter by Unit (regardless of SUM filter)
+          // Filter by Unit - get goals for this specific UM/unit
           const unitParts = filterUnit.split('_'); // Format: "UM_NAME_AGENCY_NAME"
           const umName = unitParts.slice(0, -1).join('_'); // Handle names with underscores
+          console.log(`[ReportsPage] ADD filtering by Unit: "${umName}"`);
           loadedGoals = await getUnitGoals(umName, user.agencyName);
+          console.log(`[ReportsPage] ADD loaded ${loadedGoals.length} goals for Unit "${umName}"`);
         } else {
-          // Overall agency view (both filters = 'all')
-          loadedGoals = await getAgencyGoals(user.agencyName);
+          // Overall agency view (both filters = 'all') - get all goals for ADD's agency
+          console.log(`[ReportsPage] ADD loading all goals for agency using getGoalsForADD`);
+          console.log(`[ReportsPage] Calling getGoalsForADD("${user.name}", "${user.agencyName}")`);
+          loadedGoals = await getGoalsForADD(user.name, user.agencyName);
+          console.log(`[ReportsPage] ADD loaded ${loadedGoals.length} goals from getGoalsForADD`);
+          
+          // Debug: Log sample goals
+          if (loadedGoals.length > 0) {
+            console.log(`[ReportsPage] Sample goals:`, loadedGoals.slice(0, 3).map(g => ({
+              userName: g.userName,
+              userRank: g.userRank,
+              agencyName: g.agencyName
+            })));
+          } else {
+            console.warn(`[ReportsPage] No goals loaded for ADD user!`);
+          }
         }
       } else if (user.rank === 'SUM') {
         // SUM: Get consolidated goals
@@ -197,7 +479,36 @@ export default function ReportsPage() {
         return;
       }
       
-      setGoals(loadedGoals);
+      // Deduplicate goals: keep only the most recent goal per user
+      // Group goals by userId (or userName + userRank as fallback)
+      const goalsMap = new Map<string, StrategicPlanningGoal>();
+      loadedGoals.forEach(goal => {
+        const key = goal.userId || `${goal.userName}_${goal.userRank}`;
+        const existing = goalsMap.get(key);
+        
+        if (!existing) {
+          // First goal for this user - add it
+          goalsMap.set(key, goal);
+        } else {
+          // Compare submittedAt dates - keep the most recent
+          const existingDate = existing.submittedAt instanceof Date 
+            ? existing.submittedAt 
+            : new Date(existing.submittedAt);
+          const currentDate = goal.submittedAt instanceof Date 
+            ? goal.submittedAt 
+            : new Date(goal.submittedAt);
+          
+          if (currentDate > existingDate) {
+            // Current goal is more recent - replace existing
+            goalsMap.set(key, goal);
+          }
+        }
+      });
+      
+      const deduplicatedGoals = Array.from(goalsMap.values());
+      console.log(`[ReportsPage] Deduplicated ${loadedGoals.length} goals to ${deduplicatedGoals.length} unique goals`);
+      
+      setGoals(deduplicatedGoals);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load reports');
       console.error('Error loading goals:', err);
@@ -206,10 +517,44 @@ export default function ReportsPage() {
     }
   };
 
-  const calculateAggregates = () => {
+  const calculateAggregates = async () => {
     const filtered = goals.filter(goal => {
       if (filterAgency !== 'all' && goal.agencyName !== filterAgency) return false;
       if (filterRank !== 'all' && goal.userRank !== filterRank) return false;
+      if (filterSUM !== 'all') {
+        // Filter by SUM: include goals where:
+        // 1. Goal is from the SUM itself (verify from user records)
+        const goalUserRank = userRankMap.get(goal.userName) || goal.userRank;
+        if (goalUserRank === 'SUM' && goal.userName === filterSUM) {
+          // SUM's own goal - include
+        } else if (goalUserRank === 'UM') {
+          // 2. Goal is from a UM that reports to this SUM
+          // Check if this UM reports to the selected SUM
+          const umsUnderSUM = sumToUMsMap.get(filterSUM) || [];
+          // Also check if goal.unitManager equals filterSUM (in case it's set correctly)
+          if (!umsUnderSUM.includes(goal.userName) && goal.unitManager !== filterSUM) {
+            return false;
+          }
+        } else {
+          // 3. Goal is from an advisor or other role
+          // Check if advisor reports directly to SUM (verify SUM from user records)
+          const unitManagerRank = userRankMap.get(goal.unitManager || '');
+          if (unitManagerRank === 'SUM' && goal.unitManager === filterSUM) {
+            // Direct advisor under SUM - include
+          } else {
+            // Check if their UM reports to this SUM
+            const umsUnderSUM = sumToUMsMap.get(filterSUM) || [];
+            if (!umsUnderSUM.includes(goal.unitManager)) {
+              // Also check if UM goal exists and has unitManager set to SUM (verify from user records)
+              const umGoal = goals.find(g => g.userName === goal.unitManager);
+              const umGoalUserRank = umGoal ? (userRankMap.get(umGoal.userName) || umGoal.userRank) : null;
+              if (!umGoal || !umGoalUserRank || (umGoal.unitManager !== filterSUM && !umsUnderSUM.includes(umGoal.userName))) {
+                return false;
+              }
+            }
+          }
+        }
+      }
       if (filterUnit !== 'all') {
         const goalUnitName = goal.unitName || `${goal.unitManager}_${goal.agencyName}`;
         if (goalUnitName !== filterUnit) return false;
@@ -226,6 +571,7 @@ export default function ReportsPage() {
       totalIncome: 0,
       avgMonthlyIncome: 0,
       byAgency: {},
+      bySUM: {},
       byUnit: {},
       byRank: {},
       quarterly: {
@@ -258,22 +604,41 @@ export default function ReportsPage() {
     Object.entries(unitGroups).forEach(([unitName, unitGoals]) => {
       const unitTotal = unitGoals.reduce((acc, goal) => {
         const annualNewRecruits = calculateAnnualNewRecruits(goal);
+        // Beginning Manpower Base: Only from leaders (UM, SUM, ADD)
+        const isLeader = goal.userRank === 'UM' || goal.userRank === 'SUM' || goal.userRank === 'ADD';
+        const beginningBase = isLeader ? (goal.q1?.baseManpower || 0) : 0;
+        // End Manpower: Q1 Base Manpower + Total New Recruits (Q1+Q2+Q3+Q4) - only from leaders
+        // This ensures consistency: End = Beginning Base + All New Recruits Added
+        const endManpower = isLeader ? ((goal.q1?.baseManpower || 0) + annualNewRecruits) : 0;
+        
         return {
           count: acc.count + 1,
+          beginningManpowerBase: acc.beginningManpowerBase + beginningBase,
+          endManpower: acc.endManpower + endManpower,
           manpower: acc.manpower + goal.annualManpower,
           newRecruits: acc.newRecruits + annualNewRecruits,
           fyp: acc.fyp + goal.annualFYP,
           fyc: acc.fyc + goal.annualFYC,
           income: acc.income + goal.annualIncome,
         };
-      }, { count: 0, manpower: 0, newRecruits: 0, fyp: 0, fyc: 0, income: 0 });
+      }, { count: 0, beginningManpowerBase: 0, endManpower: 0, manpower: 0, newRecruits: 0, fyp: 0, fyc: 0, income: 0 });
 
       // Store unit totals
+      // For units, identify the leader (UM, SUM, or ADD)
+      // Use the leader's userName as unitManager for display (in canonical all-caps format)
       const firstGoal = unitGoals[0];
+      const unitLeaderGoal = unitGoals.find(g => g.userRank === 'UM' || g.userRank === 'SUM' || g.userRank === 'ADD');
+      // Use leader's userName if found, otherwise use unitManager from first goal
+      const unitManagerName = unitLeaderGoal?.userName || firstGoal.unitManager;
+      // Canonicalize UM/SUM names to all caps for consistency
+      const canonicalUnitManager = getCanonicalName(unitManagerName);
+      
       agg.byUnit[unitName] = {
-        unitManager: firstGoal.unitManager,
+        unitManager: canonicalUnitManager,
         agencyName: firstGoal.agencyName,
         count: unitTotal.count,
+        beginningManpowerBase: unitTotal.beginningManpowerBase,
+        endManpower: unitTotal.endManpower,
         manpower: unitTotal.manpower,
         newRecruits: unitTotal.newRecruits,
         fyp: unitTotal.fyp,
@@ -282,19 +647,86 @@ export default function ReportsPage() {
       };
     });
 
-    // STEP 3: Calculate agency totals from unit totals (agency-level consolidation)
-    // Exclude "No Agency" from agency totals
-    Object.values(agg.byUnit).forEach(unitData => {
-      const agencyName = unitData.agencyName;
+    // STEP 3: Calculate SUM totals from unit totals (SUM-level consolidation)
+    // Use user records (userRankMap) as source of truth for ranks, not goal.userRank
+    const umToSumMap = new Map<string, string>();
+    const sumNames = new Set<string>();
+    
+    // First, identify all SUMs from user records (source of truth)
+    // Use canonical names for consistency
+    userRankMap.forEach((rank, userName) => {
+      if (rank === 'SUM') {
+        sumNames.add(getCanonicalName(userName));
+      }
+    });
+    
+    // Then, build UM -> SUM map from goals (verify SUM from user records)
+    // Use canonical names for keys to handle case differences
+    filtered.forEach(goal => {
+      const unitManagerRank = userRankMap.get(goal.unitManager || '');
+      if (goal.userName && unitManagerRank === 'SUM') {
+        // For UMs, unitManager is the SUM they report to (verified from user records)
+        // Store with canonical names for consistent comparison
+        const canonicalUM = getCanonicalName(goal.userName);
+        const canonicalSUM = getCanonicalName(goal.unitManager);
+        umToSumMap.set(canonicalUM, canonicalSUM);
+      }
+    });
+
+    // Group units by SUM
+    // Use canonical names for comparison to handle case differences
+    Object.entries(agg.byUnit).forEach(([unitName, unitData]) => {
+      // unitData.unitManager is already canonicalized (all caps)
+      const umName = unitData.unitManager;
+      let sumName: string | undefined;
       
-      // Skip "No Agency" entries - they should not be included in agency totals
-      if (agencyName === 'No Agency') {
-        return;
+      // Check if this unit's manager is a SUM (direct advisors under SUM)
+      // sumNames contains canonical names, so comparison should work
+      if (sumNames.has(umName)) {
+        sumName = umName;
+      } else {
+        // Otherwise, check if the UM reports to a SUM
+        // umToSumMap uses canonical names, so lookup should work
+        sumName = umToSumMap.get(umName);
       }
       
-      if (!agg.byAgency[agencyName]) {
-        agg.byAgency[agencyName] = {
+      // Only aggregate if we found a SUM
+      if (sumName) {
+        // Canonicalize SUM name to all caps for consistency
+        const canonicalSumName = getCanonicalName(sumName);
+        if (!agg.bySUM[canonicalSumName]) {
+          agg.bySUM[canonicalSumName] = {
+            sumName: canonicalSumName,
+            agencyName: unitData.agencyName,
+            count: 0,
+            beginningManpowerBase: 0,
+            endManpower: 0,
+            newRecruits: 0,
+            fyp: 0,
+            fyc: 0,
+            income: 0,
+          };
+        }
+        // Sum unit totals to get SUM totals
+        agg.bySUM[canonicalSumName].count += unitData.count;
+        agg.bySUM[canonicalSumName].beginningManpowerBase += unitData.beginningManpowerBase;
+        agg.bySUM[canonicalSumName].endManpower += unitData.endManpower;
+        agg.bySUM[canonicalSumName].newRecruits += unitData.newRecruits;
+        agg.bySUM[canonicalSumName].fyp += unitData.fyp;
+        agg.bySUM[canonicalSumName].fyc += unitData.fyc;
+        agg.bySUM[canonicalSumName].income += unitData.income;
+      }
+    });
+
+    // STEP 4: Calculate agency totals from unit totals (agency-level consolidation)
+    // Use canonical agency names to group properly (normalize case variations)
+    Object.values(agg.byUnit).forEach(unitData => {
+      const canonicalAgencyName = getCanonicalAgencyName(unitData.agencyName);
+      if (!agg.byAgency[canonicalAgencyName]) {
+        agg.byAgency[canonicalAgencyName] = {
           count: 0,
+          beginningManpowerBase: 0,
+          endManpower: 0,
           manpower: 0,
           newRecruits: 0,
           fyp: 0,
@@ -303,15 +735,17 @@ export default function ReportsPage() {
         };
       }
       // Sum unit totals (not individual goals) to get agency totals
-      agg.byAgency[agencyName].count += unitData.count;
-      agg.byAgency[agencyName].manpower += unitData.manpower;
-      agg.byAgency[agencyName].newRecruits += unitData.newRecruits;
-      agg.byAgency[agencyName].fyp += unitData.fyp;
-      agg.byAgency[agencyName].fyc += unitData.fyc;
-      agg.byAgency[agencyName].income += unitData.income;
+      agg.byAgency[canonicalAgencyName].count += unitData.count;
+      agg.byAgency[canonicalAgencyName].beginningManpowerBase += unitData.beginningManpowerBase;
+      agg.byAgency[canonicalAgencyName].endManpower += unitData.endManpower;
+      agg.byAgency[canonicalAgencyName].manpower += unitData.manpower;
+      agg.byAgency[canonicalAgencyName].newRecruits += unitData.newRecruits;
+      agg.byAgency[canonicalAgencyName].fyp += unitData.fyp;
+      agg.byAgency[canonicalAgencyName].fyc += unitData.fyc;
+      agg.byAgency[canonicalAgencyName].income += unitData.income;
     });
 
-    // STEP 4: Calculate overall totals from agency totals (excluding "No Agency")
+    // STEP 5: Calculate overall totals from agency totals
     Object.values(agg.byAgency).forEach(agencyData => {
       agg.totalManpower += agencyData.manpower;
       agg.totalNewRecruits += agencyData.newRecruits;
@@ -320,7 +754,7 @@ export default function ReportsPage() {
       agg.totalIncome += agencyData.income;
     });
 
-    // STEP 5: Calculate by rank (still using individual goals for rank breakdown)
+    // STEP 6: Calculate by rank (still using individual goals for rank breakdown)
     filtered.forEach(goal => {
       if (!agg.byRank[goal.userRank]) {
         agg.byRank[goal.userRank] = {
@@ -345,7 +779,7 @@ export default function ReportsPage() {
       ? agg.totalIncome / filtered.length / 12 
       : 0;
 
-    // STEP 6: Calculate quarterly totals (sum all filtered goals' quarterly data)
+    // STEP 7: Calculate quarterly totals (sum all filtered goals' quarterly data)
     filtered.forEach(goal => {
       // Q1 totals
       agg.quarterly.q1.baseManpower += goal.q1?.baseManpower || 0;
@@ -382,6 +816,28 @@ export default function ReportsPage() {
   const filteredGoals = goals.filter(goal => {
     if (filterAgency !== 'all' && goal.agencyName !== filterAgency) return false;
     if (filterRank !== 'all' && goal.userRank !== filterRank) return false;
+    if (filterSUM !== 'all') {
+      // Filter by SUM: include goals where:
+      // 1. Goal is from a UM that reports to this SUM (unitManager === filterSUM for UMs)
+      // 2. Goal is from an advisor under a UM that reports to this SUM
+      // 3. Goal is from a direct advisor under this SUM (unitManager === filterSUM for advisors)
+      if (goal.userRank === 'UM' && goal.unitManager !== filterSUM) return false;
+      if (goal.userRank === 'ADV' || goal.userRank === 'AUM') {
+        // For advisors, check if their UM reports to this SUM, or if they report directly to SUM
+        if (goal.unitManager === filterSUM) {
+          // Direct advisor under SUM - include
+        } else {
+          // Check if their UM reports to this SUM
+          const umGoal = goals.find(g => g.userName === goal.unitManager && g.userRank === 'UM');
+          if (!umGoal || umGoal.unitManager !== filterSUM) {
+            return false;
+          }
+        }
+      }
+      // Verify SUM from user records, not goal.userRank
+      const goalUserRank = userRankMap.get(goal.userName) || goal.userRank;
+      if (goalUserRank === 'SUM' && goal.userName !== filterSUM) return false;
+    }
     if (filterUnit !== 'all') {
       const goalUnitName = goal.unitName || `${goal.unitManager}_${goal.agencyName}`;
       if (goalUnitName !== filterUnit) return false;
@@ -389,11 +845,31 @@ export default function ReportsPage() {
     return true;
   });
 
-  // Filter out "No Agency" from agency filter options (but still show in individual goal listings)
-  const agencies = Array.from(new Set(goals.map(g => g.agencyName)))
-    .filter(agency => agency !== 'No Agency')
-    .sort();
+  // Get unique agencies using canonical names to deduplicate case variations
+  const agenciesMap = new Map<string, string>(); // normalized -> canonical display name
+  goals.forEach(goal => {
+    if (goal.agencyName) {
+      const canonicalName = getCanonicalAgencyName(goal.agencyName);
+      const normalized = canonicalName.toUpperCase();
+      // Store the first canonical name we encounter for each normalized version
+      if (!agenciesMap.has(normalized)) {
+        agenciesMap.set(normalized, canonicalName);
+      }
+    }
+  });
+  const agencies = Array.from(agenciesMap.values()).sort();
   const ranks = Array.from(new Set(goals.map(g => g.userRank))).sort();
+  
+  // Get unique SUMs from user records (source of truth, not from goals)
+  // Only include users where rank='SUM' from user records
+  const sumNamesFromUsers = new Set<string>();
+  userRankMap.forEach((rank, userName) => {
+    // Only add actual SUMs from user records, not UMs
+    if (rank === 'SUM') {
+      sumNamesFromUsers.add(userName);
+    }
+  });
+  const availableSUMsForAdmin = Array.from(sumNamesFromUsers).sort();
   
   // Get unique units - filter by agency if an agency is selected
   const unitsForFilter = filterAgency !== 'all'
@@ -425,9 +901,9 @@ export default function ReportsPage() {
     ];
 
     const rows = filteredGoals.map(goal => [
-      formatDisplayName(goal.userName),
+      goal.userName,
       goal.userRank,
-      formatDisplayName(goal.unitManager),
+      goal.unitManager,
       goal.agencyName,
       goal.submittedAt.toLocaleDateString(),
       goal.monthlyTargetFYP,
@@ -524,6 +1000,7 @@ export default function ReportsPage() {
                     value={filterAgency}
                     onChange={(e) => {
                       setFilterAgency(e.target.value);
+                      setFilterSUM('all'); // Reset SUM filter when agency changes
                       setFilterUnit('all'); // Reset unit filter when agency changes
                     }}
                     className="w-full p-2 border-2 border-slate-200 rounded-lg focus:border-[#D31145] focus:ring-2 focus:ring-[#D31145]/20"
@@ -536,8 +1013,8 @@ export default function ReportsPage() {
                 </div>
               )}
               
-              {/* SUM Filter - Only for ADD */}
-              {user.rank === 'ADD' && (
+              {/* SUM Filter - For Admin and ADD */}
+              {(user.rank === 'ADMIN' || user.rank === 'ADD') && (
                 <div>
                   <label className="block text-sm font-semibold text-slate-700 mb-2">Filter by SUM</label>
                   <select
@@ -548,9 +1025,9 @@ export default function ReportsPage() {
                     }}
                     className="w-full p-2 border-2 border-slate-200 rounded-lg focus:border-[#D31145] focus:ring-2 focus:ring-[#D31145]/20"
                   >
-                    <option value="all">All SUMs (Overall Agency)</option>
-                    {availableSUMs.map(sum => (
-                      <option key={sum} value={sum}>{sum}</option>
+                    <option value="all">All SUMs</option>
+                    {(user.rank === 'ADMIN' ? availableSUMsForAdmin : availableSUMs).map(sum => (
+                      <option key={sum} value={sum}>{getCanonicalName(sum)}</option>
                     ))}
                   </select>
                 </div>
@@ -569,7 +1046,7 @@ export default function ReportsPage() {
                     // Extract unit manager name from unitName format: "UnitManager_Agency"
                     const unitManagerName = unitName.split('_').slice(0, -1).join('_');
                     return (
-                      <option key={unitName} value={unitName}>{formatDisplayName(unitManagerName)}</option>
+                      <option key={unitName} value={unitName}>{getCanonicalName(unitManagerName)}</option>
                     );
                   })}
                 </select>
@@ -655,7 +1132,8 @@ export default function ReportsPage() {
                         <tr className="border-b-2 border-slate-200">
                           <th className="text-left p-3 font-semibold text-slate-700">Agency</th>
                           <th className="text-right p-3 font-semibold text-slate-700">Users</th>
-                          <th className="text-right p-3 font-semibold text-slate-700">Manpower</th>
+                          <th className="text-right p-3 font-semibold text-slate-700">Beginning Manpower Base</th>
+                          <th className="text-right p-3 font-semibold text-slate-700">End Manpower</th>
                           <th className="text-right p-3 font-semibold text-slate-700">New Recruits</th>
                           <th className="text-right p-3 font-semibold text-slate-700">Annual FYP</th>
                           <th className="text-right p-3 font-semibold text-slate-700">Annual FYC</th>
@@ -667,7 +1145,8 @@ export default function ReportsPage() {
                           <tr key={agency} className="border-b border-slate-100 hover:bg-slate-50">
                             <td className="p-3 font-medium">{agency}</td>
                             <td className="p-3 text-right">{data.count}</td>
-                            <td className="p-3 text-right">{Math.round(data.manpower)}</td>
+                            <td className="p-3 text-right">{Math.round(data.beginningManpowerBase)}</td>
+                            <td className="p-3 text-right">{Math.round(data.endManpower)}</td>
                             <td className="p-3 text-right">{Math.round(data.newRecruits)}</td>
                             <td className="p-3 text-right">₱{formatNumberWithCommas(Math.round(data.fyp))}</td>
                             <td className="p-3 text-right">₱{formatNumberWithCommas(Math.round(data.fyc))}</td>
@@ -680,51 +1159,93 @@ export default function ReportsPage() {
                 </div>
               )}
 
-              {/* Aggregated by Unit */}
+              {/* Aggregated by Unit - Collapsible */}
               {aggregated && Object.keys(aggregated.byUnit).length > 0 && (
-                <div className="bg-white rounded-lg shadow-md p-6 mb-6">
-                  <h2 className="text-xl font-bold text-slate-900 mb-4">Summary by Unit</h2>
-                  <p className="text-sm text-slate-600 mb-4">
-                    Unit totals are consolidated from individual advisor/leader goals within each unit.
-                  </p>
-                  <div className="overflow-x-auto">
-                    <table className="w-full text-sm">
-                      <thead>
-                        <tr className="border-b-2 border-slate-200">
-                          <th className="text-left p-3 font-semibold text-slate-700">Unit Manager</th>
-                          <th className="text-left p-3 font-semibold text-slate-700">Agency</th>
-                          <th className="text-right p-3 font-semibold text-slate-700">Users</th>
-                          <th className="text-right p-3 font-semibold text-slate-700">Manpower</th>
-                          <th className="text-right p-3 font-semibold text-slate-700">New Recruits</th>
-                          <th className="text-right p-3 font-semibold text-slate-700">Annual FYP</th>
-                          <th className="text-right p-3 font-semibold text-slate-700">Annual FYC</th>
-                          <th className="text-right p-3 font-semibold text-slate-700">Annual Income</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {Object.entries(aggregated.byUnit)
-                          .sort(([, a], [, b]) => {
-                            // Sort by agency first, then by unit manager name
-                            if (a.agencyName !== b.agencyName) {
-                              return a.agencyName.localeCompare(b.agencyName);
+                <div className="bg-white rounded-lg shadow-md mb-6 border border-slate-200 overflow-hidden">
+                  {/* Summary by Unit Header - Clickable */}
+                  <button
+                    onClick={() => setShowSummaryByUnit(!showSummaryByUnit)}
+                    className="w-full bg-gradient-to-r from-slate-100 to-slate-50 hover:from-slate-200 hover:to-slate-100 transition-colors p-4 flex items-center justify-between border-b border-slate-200"
+                  >
+                    <div className="flex items-center gap-3 flex-1">
+                      <i className={`fa-solid ${showSummaryByUnit ? 'fa-chevron-down' : 'fa-chevron-right'} text-slate-600 transition-transform duration-200`}></i>
+                      <div className="text-left flex-1">
+                        <h2 className="text-xl font-bold text-slate-900">Summary by Unit</h2>
+                        <p className="text-sm text-slate-600 mt-1">
+                          Unit totals are consolidated from individual advisor/leader goals within each unit.
+                        </p>
+                      </div>
+                    </div>
+                  </button>
+                  
+                  {/* Summary by Unit Content - Collapsible */}
+                  {showSummaryByUnit && (
+                    <div className="p-6 transition-all duration-300 ease-in-out">
+                      <div className="overflow-x-auto">
+                        {(() => {
+                          // Group units by agency
+                          const unitsByAgency = new Map<string, Array<[string, typeof aggregated.byUnit[string]]>>();
+                          
+                          Object.entries(aggregated.byUnit).forEach(([unitName, data]) => {
+                            const canonicalAgencyName = getCanonicalAgencyName(data.agencyName);
+                            if (!unitsByAgency.has(canonicalAgencyName)) {
+                              unitsByAgency.set(canonicalAgencyName, []);
                             }
-                            return a.unitManager.localeCompare(b.unitManager);
-                          })
-                          .map(([unitName, data]) => (
-                            <tr key={unitName} className="border-b border-slate-100 hover:bg-slate-50">
-                              <td className="p-3 font-medium">{formatDisplayName(data.unitManager)}</td>
-                              <td className="p-3">{data.agencyName}</td>
-                              <td className="p-3 text-right">{data.count}</td>
-                              <td className="p-3 text-right">{Math.round(data.manpower)}</td>
-                              <td className="p-3 text-right">{Math.round(data.newRecruits)}</td>
-                              <td className="p-3 text-right">₱{formatNumberWithCommas(Math.round(data.fyp))}</td>
-                              <td className="p-3 text-right">₱{formatNumberWithCommas(Math.round(data.fyc))}</td>
-                              <td className="p-3 text-right">₱{formatNumberWithCommas(Math.round(data.income))}</td>
-                            </tr>
-                          ))}
-                      </tbody>
-                    </table>
-                  </div>
+                            unitsByAgency.get(canonicalAgencyName)!.push([unitName, data]);
+                          });
+                          
+                          // Sort agencies alphabetically
+                          const sortedAgencies = Array.from(unitsByAgency.keys()).sort();
+                          
+                          return sortedAgencies.map((agencyName) => {
+                            const units = unitsByAgency.get(agencyName)!;
+                            // Sort units alphabetically by unit manager name within each agency
+                            const sortedUnits = units.sort(([, a], [, b]) => {
+                              return getCanonicalName(a.unitManager).localeCompare(getCanonicalName(b.unitManager));
+                            });
+                            
+                            return (
+                              <div key={agencyName} className="mb-6 last:mb-0">
+                                {/* Agency Header */}
+                                <h3 className="text-lg font-bold text-slate-800 mb-3 pb-2 border-b border-slate-200">
+                                  {agencyName}
+                                </h3>
+                                
+                                <table className="w-full text-sm">
+                                  <thead>
+                                    <tr className="border-b-2 border-slate-200 bg-slate-50">
+                                      <th className="text-left p-3 font-semibold text-slate-700">Unit Manager</th>
+                                      <th className="text-right p-3 font-semibold text-slate-700">Users</th>
+                                      <th className="text-right p-3 font-semibold text-slate-700">Beginning Manpower Base</th>
+                                      <th className="text-right p-3 font-semibold text-slate-700">End Manpower</th>
+                                      <th className="text-right p-3 font-semibold text-slate-700">New Recruits</th>
+                                      <th className="text-right p-3 font-semibold text-slate-700">Annual FYP</th>
+                                      <th className="text-right p-3 font-semibold text-slate-700">Annual FYC</th>
+                                      <th className="text-right p-3 font-semibold text-slate-700">Annual Income</th>
+                                    </tr>
+                                  </thead>
+                                  <tbody>
+                                    {sortedUnits.map(([unitName, data]) => (
+                                      <tr key={unitName} className="border-b border-slate-100 hover:bg-slate-50">
+                                        <td className="p-3 font-medium">{getCanonicalName(data.unitManager)}</td>
+                                        <td className="p-3 text-right">{data.count}</td>
+                                        <td className="p-3 text-right">{Math.round(data.beginningManpowerBase)}</td>
+                                        <td className="p-3 text-right">{Math.round(data.endManpower)}</td>
+                                        <td className="p-3 text-right">{Math.round(data.newRecruits)}</td>
+                                        <td className="p-3 text-right">₱{formatNumberWithCommas(Math.round(data.fyp))}</td>
+                                        <td className="p-3 text-right">₱{formatNumberWithCommas(Math.round(data.fyc))}</td>
+                                        <td className="p-3 text-right">₱{formatNumberWithCommas(Math.round(data.income))}</td>
+                                      </tr>
+                                    ))}
+                                  </tbody>
+                                </table>
+                              </div>
+                            );
+                          });
+                        })()}
+                      </div>
+                    </div>
+                  )}
                 </div>
               )}
 
@@ -842,74 +1363,26 @@ export default function ReportsPage() {
                 </div>
               )}
 
-              {/* Individual Reports Table */}
+              {/* Individual Reports */}
               <div className="bg-white rounded-lg shadow-md p-6">
                 <h2 className="text-xl font-bold text-slate-900 mb-4">
                   Individual Reports ({filteredGoals.length})
                 </h2>
-                <div className="overflow-x-auto">
-                  <table className="w-full text-sm">
-                    <thead>
-                      <tr className="border-b-2 border-slate-200">
-                        <th className="text-left p-3 font-semibold text-slate-700">Name</th>
-                        <th className="text-left p-3 font-semibold text-slate-700">Rank</th>
-                        <th className="text-left p-3 font-semibold text-slate-700">Unit Manager</th>
-                        <th className="text-left p-3 font-semibold text-slate-700">Agency</th>
-                        <th className="text-right p-3 font-semibold text-slate-700">New Recruits</th>
-                        <th className="text-right p-3 font-semibold text-slate-700">Annual FYP</th>
-                        <th className="text-right p-3 font-semibold text-slate-700">Annual FYC</th>
-                        <th className="text-right p-3 font-semibold text-slate-700">Annual Income</th>
-                        <th className="text-left p-3 font-semibold text-slate-700">Submitted</th>
-                        <th className="text-center p-3 font-semibold text-slate-700">Actions</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {filteredGoals.length === 0 ? (
-                        <tr>
-                          <td colSpan={10} className="p-8 text-center text-slate-500">
-                            No reports found. Users need to submit their strategic planning goals.
-                          </td>
-                        </tr>
-                      ) : (
-                        filteredGoals.map((goal) => {
-                          const annualNewRecruits = (goal.q1?.newRecruits || 0) + 
-                                                   (goal.q2?.newRecruits || 0) + 
-                                                   (goal.q3?.newRecruits || 0) + 
-                                                   (goal.q4?.newRecruits || 0);
-                          return (
-                            <tr key={goal.id} className="border-b border-slate-100 hover:bg-slate-50">
-                              <td className="p-3 font-medium">{formatDisplayName(goal.userName)}</td>
-                              <td className="p-3">{goal.userRank}</td>
-                              <td className="p-3">{formatDisplayName(goal.unitManager)}</td>
-                              <td className="p-3">{goal.agencyName}</td>
-                              <td className="p-3 text-right">{Math.round(annualNewRecruits)}</td>
-                              <td className="p-3 text-right">₱{formatNumberWithCommas(Math.round(goal.annualFYP))}</td>
-                              <td className="p-3 text-right">₱{formatNumberWithCommas(Math.round(goal.annualFYC))}</td>
-                              <td className="p-3 text-right">₱{formatNumberWithCommas(Math.round(goal.annualIncome))}</td>
-                              <td className="p-3">{goal.submittedAt.toLocaleDateString()}</td>
-                              <td className="p-3 text-center">
-                                <button
-                                  onClick={() => setSelectedGoal(goal)}
-                                  className="px-3 py-1 bg-[#D31145] text-white rounded hover:bg-red-700 text-xs font-semibold"
-                                >
-                                  View
-                                </button>
-                              </td>
-                            </tr>
-                          );
-                        })
-                      )}
-                    </tbody>
-                  </table>
-                </div>
+                
+                {filteredGoals.length === 0 ? (
+                  <div className="p-8 text-center text-slate-500">
+                    No reports found. Users need to submit their strategic planning goals.
+                  </div>
+                ) : (
+                  <div className="p-8 text-center text-slate-500">
+                    Individual Reports display - To be implemented
+                  </div>
+                )}
               </div>
-            </>
-          )}
-
-          {/* Detail Modal */}
-          {selectedGoal && (
-            <div className="fixed inset-0 bg-black/50 flex items-center justify-center p-4 z-50" onClick={() => setSelectedGoal(null)}>
-              <div className="bg-white rounded-lg shadow-xl max-w-4xl w-full max-h-[90vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
+              {/* Detail Modal */}
+              {selectedGoal && (
+                <div className="fixed inset-0 bg-black/50 flex items-center justify-center p-4 z-50" onClick={() => setSelectedGoal(null)}>
+                  <div className="bg-white rounded-lg shadow-xl max-w-4xl w-full max-h-[90vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
                 <div className="sticky top-0 bg-[#D31145] text-white p-4 flex justify-between items-center">
                   <h3 className="text-xl font-bold">Report Details - {formatDisplayName(selectedGoal.userName)}</h3>
                   <button
@@ -931,7 +1404,7 @@ export default function ReportsPage() {
                     </div>
                     <div>
                       <p className="text-sm text-slate-600">Unit Manager</p>
-                      <p className="font-semibold">{formatDisplayName(selectedGoal.unitManager)}</p>
+                      <p className="font-semibold">{getCanonicalName(selectedGoal.unitManager)}</p>
                     </div>
                     <div>
                       <p className="text-sm text-slate-600">Agency</p>
@@ -1018,6 +1491,8 @@ export default function ReportsPage() {
                 </div>
               </div>
             </div>
+          )}
+            </>
           )}
         </div>
       </main>

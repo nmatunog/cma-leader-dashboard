@@ -9,36 +9,14 @@ import {
   getDPIRate,
   getSelfOverrideRate,
   getPersistencyMultiplier,
-  getPersonalPersistencyMultiplier,
   getQPBRate,
 } from '../utils/bonus-calculations';
-import { saveUserData, loadUserData } from '../utils/local-storage-persistence';
 import { ActivityPlanningChat } from '../activity-planning-chat';
 import { ActivityPlanResult } from '../activity-plan-result';
 import { generateActivityPlanFromChatData } from './leader-hq-tab-integration-helper';
 
-interface LeaderHQSavedData {
-  personalFYC: number;
-  activeRecruits: number;
-  tenuredCount: number;
-  tenuredProd: number;
-  newCount: number;
-  newProd: number;
-  leaderRank: 'ADD' | 'SUM' | 'UM' | 'AUM';
-  persistency: number;
-}
-
 interface LeaderHQTabProps {
   userState: UserState;
-  onGenerateRecruitmentAd: (context: {
-    personalFYC: number;
-    activeRecruits: number;
-    tenuredCount: number;
-    tenuredProd: number;
-    newCount: number;
-    newProd: number;
-    persistency: number;
-  }) => void;
   onPushToGoals?: (data: {
     personalFYC: number;
     tenuredCount: number;
@@ -48,19 +26,15 @@ interface LeaderHQTabProps {
   }) => void;
 }
 
-export function LeaderHQTab({ userState, onGenerateRecruitmentAd, onPushToGoals }: LeaderHQTabProps) {
-  // Load saved data on mount
-  const savedData = loadUserData<LeaderHQSavedData>(userState.uid, 'leader_hq');
-  
-  const [personalFYC, setPersonalFYC] = useState(savedData?.personalFYC ?? 50000);
-  const [tenuredCount, setTenuredCount] = useState(savedData?.tenuredCount ?? 4);
-  const [tenuredProd, setTenuredProd] = useState(savedData?.tenuredProd ?? 20000);
-  const [newCount, setNewCount] = useState(savedData?.newCount ?? 2);
-  const [newProd, setNewProd] = useState(savedData?.newProd ?? 30000);
-  // Active Recruits auto-syncs with New Count for consistency
-  const [activeRecruits, setActiveRecruits] = useState(savedData?.newCount ?? 2);
-  const [leaderRank, setLeaderRank] = useState<'ADD' | 'SUM' | 'UM' | 'AUM'>(savedData?.leaderRank ?? 'UM');
-  const [persistency, setPersistency] = useState(savedData?.persistency ?? 82.5);
+export function LeaderHQTab({ userState, onPushToGoals }: LeaderHQTabProps) {
+  const [personalFYC, setPersonalFYC] = useState(50000);
+  const [activeRecruits, setActiveRecruits] = useState(3);
+  const [tenuredCount, setTenuredCount] = useState(4);
+  const [tenuredProd, setTenuredProd] = useState(20000);
+  const [newCount, setNewCount] = useState(2);
+  const [newProd, setNewProd] = useState(30000);
+  const [leaderRank, setLeaderRank] = useState<'ADD' | 'SUM' | 'UM' | 'AUM'>('UM');
+  const [persistency, setPersistency] = useState(82.5);
   const [totalIncome, setTotalIncome] = useState(0);
   const [showBreakdown, setShowBreakdown] = useState(false);
   const [showActivityChat, setShowActivityChat] = useState(false);
@@ -93,11 +67,6 @@ export function LeaderHQTab({ userState, onGenerateRecruitmentAd, onPushToGoals 
   const chartRef = useRef<HTMLCanvasElement>(null);
   const chartInstanceRef = useRef<Chart | null>(null);
 
-  // Auto-sync activeRecruits with newCount for consistency
-  useEffect(() => {
-    setActiveRecruits(newCount);
-  }, [newCount]);
-
   useEffect(() => {
     const pFYC = personalFYC || 0;
     const aRec = activeRecruits || 0;
@@ -115,14 +84,14 @@ export function LeaderHQTab({ userState, onGenerateRecruitmentAd, onPushToGoals 
     // Note: getFYCBonusRate expects QUARTERLY FYC, so we multiply monthly by 3
     const quarterlyFYC = pFYCNum * 3;
     const fycBonusRate = getFYCBonusRate(quarterlyFYC);
-    // Personal bonuses use personal persistency multiplier (caps at 100%)
-    const persMultiplierPersonal = getPersonalPersistencyMultiplier(persistency);
+    // Personal bonuses use personal persistency (same as persistency input for now)
+    const persMultiplierPersonal = getPersistencyMultiplier(persistency);
     const pBonus = pFYCNum * fycBonusRate * persMultiplierPersonal; // Apply persistency multiplier
     const pTotal = pFYCNum + pBonus;
 
-    // ACS 3.0 Self-Override (based on Active New Recruits) - NO persistency multiplier
+    // ACS 3.0 Self-Override (based on Active New Recruits) - WITH persistency multiplier
     const sOverrideRate = getSelfOverrideRate(aRec);
-    const sOverride = pFYCNum * sOverrideRate; // NO persistency multiplier
+    const sOverride = pFYCNum * sOverrideRate * persMultiplierPersonal; // Apply persistency multiplier
 
     // ACS 3.0 Direct Production Incentive (DPI) - Base rates by rank
     // Base DPI is paid monthly (FYC x DPI rate)
@@ -205,22 +174,6 @@ export function LeaderHQTab({ userState, onGenerateRecruitmentAd, onPushToGoals 
     }
   }, [personalFYC, activeRecruits, tenuredCount, tenuredProd, newCount, newProd, leaderRank, persistency]);
 
-  // Save data to localStorage when values change (skip initial load)
-  useEffect(() => {
-    const dataToSave: LeaderHQSavedData = {
-      personalFYC,
-      activeRecruits,
-      tenuredCount,
-      tenuredProd,
-      newCount,
-      newProd,
-      leaderRank,
-      persistency,
-    };
-    
-    saveUserData(userState.uid, 'leader_hq', dataToSave);
-  }, [personalFYC, activeRecruits, tenuredCount, tenuredProd, newCount, newProd, leaderRank, persistency, userState.uid]);
-
   return (
     <section className="space-y-6">
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
@@ -267,9 +220,8 @@ export function LeaderHQTab({ userState, onGenerateRecruitmentAd, onPushToGoals 
                   <input
                     type="number"
                     value={activeRecruits}
-                    readOnly
-                    className="w-full text-sm p-2.5 border-2 border-slate-200 rounded-lg bg-slate-50 text-slate-600 cursor-not-allowed"
-                    title="Automatically syncs with New Recruits count"
+                    onChange={(e) => setActiveRecruits(parseInt(e.target.value) || 0)}
+                    className="w-full text-sm p-2.5 border-2 border-slate-200 rounded-lg focus:border-[#D31145] focus:ring-2 focus:ring-[#D31145]/20 transition-all shadow-sm"
                   />
                 </div>
               </div>
@@ -347,29 +299,18 @@ export function LeaderHQTab({ userState, onGenerateRecruitmentAd, onPushToGoals 
             </div>
             {onPushToGoals && (
               <button
-                onClick={(e) => {
-                  e.preventDefault();
-                  e.stopPropagation();
-                  try {
-                    const personalFYCNum = typeof personalFYC === 'string' ? parseCommaNumber(personalFYC) : (typeof personalFYC === 'number' ? personalFYC : 0);
-                    const tenuredProdNum = typeof tenuredProd === 'string' ? parseCommaNumber(tenuredProd) : (typeof tenuredProd === 'number' ? tenuredProd : 0);
-                    const newProdNum = typeof newProd === 'string' ? parseCommaNumber(newProd) : (typeof newProd === 'number' ? newProd : 0);
-                    
-                    const data = {
-                      personalFYC: personalFYCNum || 0,
-                      tenuredCount: tenuredCount || 0,
-                      tenuredProd: tenuredProdNum || 0,
-                      newCount: newCount || 0,
-                      newProd: newProdNum || 0,
-                      activeRecruits: activeRecruits || 0, // Include activeRecruits for Self Override
-                    };
-                    
-                    console.log('Leader HQ: Pushing to goals:', data);
-                    onPushToGoals(data);
-                  } catch (error) {
-                    console.error('Error pushing to goals:', error);
-                    alert('Error pushing data to Goal Setting. Please try again.');
-                  }
+                onClick={() => {
+                  const personalFYCNum = typeof personalFYC === 'string' ? parseCommaNumber(personalFYC) : personalFYC;
+                  const tenuredProdNum = typeof tenuredProd === 'string' ? parseCommaNumber(tenuredProd) : tenuredProd;
+                  const newProdNum = typeof newProd === 'string' ? parseCommaNumber(newProd) : newProd;
+                  
+                  onPushToGoals({
+                    personalFYC: personalFYCNum || 0,
+                    tenuredCount: tenuredCount || 0,
+                    tenuredProd: tenuredProdNum || 0,
+                    newCount: newCount || 0,
+                    newProd: newProdNum || 0,
+                  });
                 }}
                 className="w-full bg-gradient-to-r from-green-600 to-emerald-600 text-white font-bold py-3.5 rounded-xl hover:shadow-lg hover:scale-[1.02] transition-all shadow-md flex items-center justify-center gap-2 text-sm mb-3"
               >
@@ -577,12 +518,12 @@ export function LeaderHQTab({ userState, onGenerateRecruitmentAd, onPushToGoals 
                     const result = await generateActivityPlanFromChatData(
                       userState,
                       {
-                        personalFYC,
+                        personalFYC: typeof personalFYC === 'string' ? parseCommaNumber(personalFYC) : personalFYC,
                         activeRecruits,
                         tenuredCount,
-                        tenuredProd,
+                        tenuredProd: typeof tenuredProd === 'string' ? parseCommaNumber(tenuredProd) : tenuredProd,
                         newCount,
-                        newProd,
+                        newProd: typeof newProd === 'string' ? parseCommaNumber(newProd) : newProd,
                         persistency,
                       },
                       chatData

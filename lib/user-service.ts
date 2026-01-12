@@ -22,6 +22,8 @@ import { auth, db } from './firebase';
 import type { User, UserUpdateData, UserRole, UserRank } from '@/types/user';
 import { isSuperuser } from '@/lib/permissions';
 import { saveHierarchyEntry } from '@/services/organizational-hierarchy-service';
+import { getCanonicalAgencyName } from '@/lib/utils/agency-name-normalizer';
+import { getCanonicalName } from '@/lib/utils/name-canonicalizer';
 
 const USERS_COLLECTION = 'users';
 
@@ -217,21 +219,28 @@ async function syncUserToHierarchy(user: User): Promise<void> {
     }
 
     // Auto-assign unitManager for leaders (except AUMs):
-    // - UMs, SUMs, and ADDs should have themselves as unitManager
-    // - AUMs keep their actual unitManager
+    // - UMs, SUMs, and ADDs should have themselves as unitManager (in all caps)
+    // - AUMs keep their actual unitManager (normalized to all caps)
     let finalUnitManager = user.unitManager;
     if (user.role === 'leader' && user.rank !== 'AUM') {
       if (user.rank === 'UM' || user.rank === 'SUM' || user.rank === 'ADD') {
-        finalUnitManager = user.name; // Leaders manage their own units
+        // Use canonical name (all caps) for UM/SUM/ADD names
+        finalUnitManager = getCanonicalName(user.name);
       }
+    } else if (user.unitManager) {
+      // For advisors and AUMs, normalize their unitManager to all caps
+      finalUnitManager = getCanonicalName(user.unitManager);
     }
+
+    // Normalize agency name before syncing to hierarchy
+    const normalizedAgencyName = getCanonicalAgencyName(user.agencyName);
 
     // Sync to hierarchy
     await saveHierarchyEntry({
       name: user.name,
       displayName: user.name,
       rank: user.rank,
-      agencyName: user.agencyName,
+      agencyName: normalizedAgencyName, // Use normalized agency name
       unitManager: finalUnitManager,
       code: user.code,
     });
@@ -276,36 +285,50 @@ export async function updateUser(uid: string, updates: UserUpdateData, updatedBy
     }
     
     // Auto-assign unitManager for leaders (except AUMs):
-    // - UMs, SUMs, and ADDs should have themselves as unitManager
-    // - AUMs keep their actual unitManager
+    // - UMs, SUMs, and ADDs ALWAYS have themselves as unitManager (in all caps)
+    // - AUMs keep their actual unitManager (normalized to all caps)
     if (updates.rank) {
       const newRank = updates.rank;
       const newRole = updates.role || currentUser.role;
       
-      // If becoming a leader with rank UM, SUM, or ADD, set unitManager to self
+      // If becoming a leader with rank UM, SUM, or ADD, ALWAYS set unitManager to self (in all caps)
       if (newRole === 'leader' && (newRank === 'UM' || newRank === 'SUM' || newRank === 'ADD')) {
-        updates.unitManager = currentUser.name;
+        updates.unitManager = getCanonicalName(currentUser.name);
+      }
+      // If becoming AUM, normalize unitManager to all caps if provided
+      if (updates.unitManager && newRank === 'AUM') {
+        updates.unitManager = getCanonicalName(updates.unitManager);
       }
       // If becoming AUM, keep existing unitManager or don't override if provided
       // (AUMs should have their actual unit manager, not themselves)
     } else if (updates.role === 'leader' && currentUser.rank !== 'AUM') {
       // If changing role to leader (but rank not specified), check current rank
       if (currentUser.rank === 'UM' || currentUser.rank === 'SUM' || currentUser.rank === 'ADD') {
-        updates.unitManager = currentUser.name;
+        // UMs, SUMs, and ADDs ALWAYS have themselves as unitManager
+        updates.unitManager = getCanonicalName(currentUser.name);
       }
+    } else if (updates.unitManager) {
+      // Normalize any unitManager update to all caps (for advisors and AUMs)
+      updates.unitManager = getCanonicalName(updates.unitManager);
+    }
+    
+    // Normalize agency name if it's being updated
+    const normalizedUpdates = { ...updates };
+    if (updates.agencyName) {
+      normalizedUpdates.agencyName = getCanonicalAgencyName(updates.agencyName);
     }
     
     const updateData: Partial<User> = {
-      ...updates,
+      ...normalizedUpdates,
       updatedAt: serverTimestamp() as Timestamp,
     };
     
     await updateDoc(userDocRef, updateData);
     
-    // Sync to hierarchy after update
+    // Sync to hierarchy after update (use normalized agency name)
     const updatedUser: User = {
       ...currentUser,
-      ...updates,
+      ...normalizedUpdates,
       updatedAt: new Date(),
     };
     await syncUserToHierarchy(updatedUser);
@@ -364,8 +387,8 @@ export async function promoteUser(uid: string): Promise<{ success: boolean; erro
     // - SUM → ADD: ADD should have themselves as unitManager (they manage their own unit)
     // All leaders (except AUMs) default to themselves as unitManager
     if (nextRank === 'UM' || nextRank === 'SUM' || nextRank === 'ADD') {
-      // Leaders manage their own units
-      updates.unitManager = user.name;
+      // Leaders manage their own units - use canonical name (all caps)
+      updates.unitManager = getCanonicalName(user.name);
     }
     // AUM keeps their actual unitManager - no change needed
 

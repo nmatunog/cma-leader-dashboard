@@ -17,6 +17,8 @@ import { auth, db } from './firebase';
 import type { User, UserCreateData, UserUpdateData, UserRole, UserRank } from '@/types/user';
 import { getUserByCode, getUserById } from './user-service';
 import { saveHierarchyEntry } from '@/services/organizational-hierarchy-service';
+import { getCanonicalAgencyName } from '@/lib/utils/agency-name-normalizer';
+import { getCanonicalName } from '@/lib/utils/name-canonicalizer';
 
 const USERS_COLLECTION = 'users';
 
@@ -47,14 +49,21 @@ export async function registerUser(userData: UserCreateData, createdBy: string):
     const firebaseUser = userCredential.user;
     
     // Auto-assign unitManager for leaders (except AUMs):
-    // - UMs, SUMs, and ADDs should have themselves as unitManager
-    // - AUMs keep their actual unitManager
+    // - UMs, SUMs, and ADDs should have themselves as unitManager (in all caps)
+    // - AUMs keep their actual unitManager (normalized to all caps)
     let finalUnitManager = userData.unitManager;
     if (userData.role === 'leader' && userData.rank !== 'AUM') {
       if (userData.rank === 'UM' || userData.rank === 'SUM' || userData.rank === 'ADD') {
-        finalUnitManager = userData.name; // Leaders manage their own units
+        // Use canonical name (all caps) for UM/SUM/ADD names
+        finalUnitManager = getCanonicalName(userData.name);
       }
+    } else if (userData.unitManager) {
+      // For advisors and AUMs, normalize their unitManager to all caps
+      finalUnitManager = getCanonicalName(userData.unitManager);
     }
+    
+    // Normalize agency name to canonical form for consistency
+    const normalizedAgencyName = getCanonicalAgencyName(userData.agencyName);
     
     // Create user document in Firestore
     const userDoc: Omit<User, 'uid'> = {
@@ -64,7 +73,7 @@ export async function registerUser(userData: UserCreateData, createdBy: string):
       role: userData.role,
       rank: userData.rank,
       unitManager: finalUnitManager,
-      agencyName: userData.agencyName,
+      agencyName: normalizedAgencyName, // Use normalized agency name
       createdAt: serverTimestamp() as Timestamp,
       updatedAt: serverTimestamp() as Timestamp,
       isActive: true,
@@ -94,8 +103,8 @@ export async function registerUser(userData: UserCreateData, createdBy: string):
           name: userData.name,
           displayName: userData.name,
           rank: userData.rank,
-          agencyName: userData.agencyName,
-          unitManager: userData.unitManager,
+          agencyName: normalizedAgencyName, // Use normalized agency name
+          unitManager: finalUnitManager, // Use final unit manager
           code: userData.code,
         });
       } catch (hierarchyError) {
@@ -322,5 +331,4 @@ export function isAuthenticated(): boolean {
 export function getFirebaseUser(): FirebaseUser | null {
   return auth.currentUser;
 }
-
 

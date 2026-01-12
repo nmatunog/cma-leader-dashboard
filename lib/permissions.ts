@@ -43,21 +43,29 @@ export function canManageUsers(user: User | null): boolean {
 }
 
 /**
- * Check if user is viewer (read-only access)
+ * Check if user is admin-viewer (read-only access)
  */
 export function isViewer(user: User | null): boolean {
   if (!user) return false;
   if (user.isActive === false) return false;
-  return user.role === 'viewer';
+  return user.role === 'admin-viewer';
 }
 
 /**
- * Check if user can view reports (admin, superuser, or viewer)
+ * Check if user can view reports (admin, superuser, admin-viewer, or leaders)
  */
 export function canViewReports(user: User | null): boolean {
   if (!user) return false;
   if (user.isActive === false) return false;
-  return user.role === 'admin' || user.role === 'superuser' || user.role === 'viewer';
+  // Admins, superusers, and admin-viewers can view all reports
+  if (user.role === 'admin' || user.role === 'superuser' || user.role === 'admin-viewer') {
+    return true;
+  }
+  // Leaders (ADD, SUM, UM) can view their team reports
+  if (user.role === 'leader' && ['ADD', 'SUM', 'UM'].includes(user.rank)) {
+    return true;
+  }
+  return false;
 }
 
 /**
@@ -68,13 +76,13 @@ export function canAccessAdminPages(user: User | null): boolean {
 }
 
 /**
- * Check if user can edit data (not viewers)
+ * Check if user can edit data (not admin-viewers)
  */
 export function canEditData(user: User | null): boolean {
   if (!user) return false;
   if (user.isActive === false) return false;
-  // Viewers cannot edit anything
-  if (user.role === 'viewer') return false;
+  // Admin-viewers cannot edit anything
+  if (user.role === 'admin-viewer') return false;
   return true;
 }
 

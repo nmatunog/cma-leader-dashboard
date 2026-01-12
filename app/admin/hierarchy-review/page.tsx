@@ -10,11 +10,13 @@ import { getAllUsers, updateUser } from '@/lib/user-service';
 import { 
   getHierarchyByAgency, 
   saveHierarchyEntry,
+  syncHierarchyFromData,
   type OrganizationalHierarchyEntry
 } from '@/services/organizational-hierarchy-service';
 import type { User, UserRank } from '@/types/user';
 import { collection, onSnapshot, query, where, getDocs } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
+import { normalizeAgencyName, areAgencyNamesEqual, getAgencyNameVariations, getCanonicalAgencyName } from '@/lib/utils/agency-name-normalizer';
 
 interface HierarchyMismatch {
   user: User;
@@ -84,9 +86,15 @@ export default function HierarchyReviewPage() {
         return;
       }
 
-      // Check for mismatches
-      const wrongAgency = hierarchyEntry.agencyName !== user.agencyName;
-      const wrongUnitManager = normalizeName(hierarchyEntry.unitManager || '') !== normalizeName(user.unitManager || '');
+      // Check for mismatches using normalized agency name comparison
+      const wrongAgency = !areAgencyNamesEqual(hierarchyEntry.agencyName, user.agencyName);
+      
+      // For UMs, SUMs, and ADDs: their unitManager in users collection is always themselves
+      // The hierarchy collection's unitManager tracks reporting relationships (different purpose)
+      // So we should NOT compare unitManager for leaders (UM, SUM, ADD) - they always have themselves
+      const isLeader = user.rank === 'UM' || user.rank === 'SUM' || user.rank === 'ADD';
+      const wrongUnitManager = !isLeader && normalizeName(hierarchyEntry.unitManager || '') !== normalizeName(user.unitManager || '');
+      
       const wrongRank = hierarchyEntry.rank !== user.rank;
 
       if (wrongAgency) {
@@ -98,6 +106,7 @@ export default function HierarchyReviewPage() {
         });
       }
 
+      // Only check unitManager for non-leaders (advisors, AUMs)
       if (wrongUnitManager) {
         issues.push({
           user,
@@ -123,12 +132,32 @@ export default function HierarchyReviewPage() {
   const reloadHierarchyAndMismatches = async (allUsers: User[]) => {
     try {
       // Load all hierarchy entries
-      const agencies = Array.from(new Set(allUsers.map(u => u.agencyName))).filter(Boolean);
-      const allHierarchyEntries: OrganizationalHierarchyEntry[] = [];
+      // Get unique agencies (normalized) to avoid duplicate queries
+      const agencyMap = new Map<string, string>(); // normalized -> original
+      allUsers.forEach(user => {
+        if (user.agencyName) {
+          const normalized = normalizeAgencyName(user.agencyName);
+          if (!agencyMap.has(normalized)) {
+            agencyMap.set(normalized, user.agencyName);
+          }
+        }
+      });
       
-      for (const agency of agencies) {
-        const entries = await getHierarchyByAgency(agency);
-        allHierarchyEntries.push(...entries);
+      const allHierarchyEntries: OrganizationalHierarchyEntry[] = [];
+      const processedEntries = new Set<string>(); // Track by entry ID to avoid duplicates
+      
+      // Query hierarchy for each unique agency (using original name, but getHierarchyByAgency handles normalization)
+      for (const [normalized, originalAgency] of agencyMap.entries()) {
+        // Try the original agency name first
+        const entries = await getHierarchyByAgency(originalAgency);
+        entries.forEach(entry => {
+          // Use entry ID or create a unique key to avoid duplicates
+          const entryKey = entry.id || `${entry.name}_${normalizeAgencyName(entry.agencyName)}`;
+          if (!processedEntries.has(entryKey)) {
+            processedEntries.add(entryKey);
+            allHierarchyEntries.push(entry);
+          }
+        });
       }
       
       setHierarchyEntries(allHierarchyEntries);
@@ -238,7 +267,42 @@ export default function HierarchyReviewPage() {
     };
   }, [currentUser, selectedAgency]);
 
-  const handleFixUser = async (mismatch: HierarchyMismatch) => {
+  const handleFixUser = async (mismatch: HierarchyMismatch, fixHierarchy = false) => {
+    if (fixHierarchy) {
+      // Fix hierarchy entry to match user record
+      if (!confirm(`Fix hierarchy entry for ${formatDisplayName(mismatch.user.name)}? This will update the hierarchy entry to match the user's current data.`)) {
+        return;
+      }
+
+      try {
+        setActionLoading(`fix-hierarchy-${mismatch.user.uid}`);
+        
+        if (mismatch.hierarchyEntry) {
+          const result = await saveHierarchyEntry({
+            name: mismatch.user.name,
+            displayName: mismatch.user.name,
+            rank: mismatch.user.rank,
+            agencyName: mismatch.user.agencyName,
+            unitManager: mismatch.user.unitManager || undefined,
+            code: mismatch.user.code,
+          });
+          
+          if (result.success) {
+            setFixedCount(prev => prev + 1);
+            await loadData();
+          } else {
+            alert(result.error || 'Failed to fix hierarchy entry');
+          }
+        }
+      } catch (err) {
+        alert(err instanceof Error ? err.message : 'Failed to fix hierarchy entry');
+      } finally {
+        setActionLoading(null);
+      }
+      return;
+    }
+
+    // Fix user record to match hierarchy entry
     if (!confirm(`Fix ${formatDisplayName(mismatch.user.name)}? This will update their agency, unit manager, and/or rank to match the organizational hierarchy.`)) {
       return;
     }
@@ -262,7 +326,8 @@ export default function HierarchyReviewPage() {
 
       // If multiple issues, fix all at once
       if (mismatch.hierarchyEntry) {
-        if (mismatch.user.agencyName !== mismatch.hierarchyEntry.agencyName) {
+        // Use normalized comparison for agency name
+        if (!areAgencyNamesEqual(mismatch.user.agencyName, mismatch.hierarchyEntry.agencyName)) {
           updates.agencyName = mismatch.hierarchyEntry.agencyName;
         }
         if ((mismatch.user.unitManager || '') !== (mismatch.hierarchyEntry.unitManager || '')) {
@@ -288,6 +353,33 @@ export default function HierarchyReviewPage() {
     }
   };
 
+  const handleSyncHierarchyFromData = async () => {
+    if (!confirm('Sync hierarchy from corrected data? This will update all hierarchy entries in Firestore to match the corrected hierarchy-data.ts file. This may take a few moments.')) {
+      return;
+    }
+
+    try {
+      setActionLoading('sync-hierarchy');
+      const result = await syncHierarchyFromData();
+      
+      if (result.success) {
+        alert(`Successfully synced ${result.updated} hierarchy entries. ${result.errors.length > 0 ? `${result.errors.length} errors occurred.` : ''}`);
+      } else {
+        alert(`Sync completed with errors. ${result.errors.length} errors occurred.`);
+      }
+      
+      if (result.errors.length > 0) {
+        console.error('Sync errors:', result.errors);
+      }
+      
+      await loadData(); // Reload to refresh mismatches
+    } catch (err) {
+      alert(err instanceof Error ? err.message : 'Failed to sync hierarchy');
+    } finally {
+      setActionLoading(null);
+    }
+  };
+
   const handleSyncAllUsers = async () => {
     if (!confirm('Sync all users to organizational hierarchy? This will update or create hierarchy entries for all users (except admins).')) {
       return;
@@ -304,12 +396,25 @@ export default function HierarchyReviewPage() {
         if (user.role === 'admin' || user.role === 'superuser') continue;
 
         try {
+          // Auto-assign unitManager for leaders (except AUMs):
+          // - UMs, SUMs, and ADDs should have themselves as unitManager
+          // - AUMs keep their actual unitManager
+          let finalUnitManager = user.unitManager;
+          if (user.role === 'leader' && user.rank !== 'AUM') {
+            if (user.rank === 'UM' || user.rank === 'SUM' || user.rank === 'ADD') {
+              finalUnitManager = user.name; // Leaders manage their own units
+            }
+          }
+
+          // Normalize agency name before syncing to hierarchy (same logic as syncUserToHierarchy)
+          const normalizedAgencyName = getCanonicalAgencyName(user.agencyName);
+
           await saveHierarchyEntry({
             name: user.name,
             displayName: user.name,
             rank: user.rank,
-            agencyName: user.agencyName,
-            unitManager: user.unitManager,
+            agencyName: normalizedAgencyName, // Use normalized agency name
+            unitManager: finalUnitManager,
             code: user.code,
           });
           synced++;
@@ -380,6 +485,60 @@ export default function HierarchyReviewPage() {
     }
   };
 
+  const handleFixHierarchyToMatchUsers = async () => {
+    const fixableMismatches = mismatches.filter(m => 
+      m.issue !== 'missing_from_hierarchy' && m.hierarchyEntry
+    );
+
+    if (fixableMismatches.length === 0) {
+      alert('No fixable mismatches found.');
+      return;
+    }
+
+    if (!confirm(`Fix all ${fixableMismatches.length} hierarchy entries to match user records? This will update hierarchy entries to match the user's current agency, unit manager, and rank.`)) {
+      return;
+    }
+
+    try {
+      setActionLoading('fix-hierarchy');
+      let fixed = 0;
+      let errors = 0;
+
+      for (const mismatch of fixableMismatches) {
+        try {
+          if (mismatch.hierarchyEntry) {
+            // Update hierarchy entry to match user record
+            const result = await saveHierarchyEntry({
+              name: mismatch.user.name,
+              displayName: mismatch.user.name,
+              rank: mismatch.user.rank,
+              agencyName: mismatch.user.agencyName, // Use user's agency (correct)
+              unitManager: mismatch.user.unitManager || undefined,
+              code: mismatch.user.code,
+            });
+            
+            if (result.success) {
+              fixed++;
+            } else {
+              errors++;
+            }
+          }
+        } catch (err) {
+          console.error(`Error fixing hierarchy for ${mismatch.user.name}:`, err);
+          errors++;
+        }
+      }
+
+      setFixedCount(fixed);
+      alert(`Fixed ${fixed} hierarchy entries. ${errors > 0 ? `${errors} errors occurred.` : ''}`);
+      await loadData();
+    } catch (err) {
+      alert(err instanceof Error ? err.message : 'Failed to fix hierarchy entries');
+    } finally {
+      setActionLoading(null);
+    }
+  };
+
   const handleFixAll = async () => {
     const fixableMismatches = mismatches.filter(m => 
       m.issue !== 'missing_from_hierarchy' && m.hierarchyEntry
@@ -404,7 +563,8 @@ export default function HierarchyReviewPage() {
           const updates: any = {};
           
           if (mismatch.hierarchyEntry) {
-            if (mismatch.user.agencyName !== mismatch.hierarchyEntry.agencyName) {
+            // Use normalized comparison for agency name
+            if (!areAgencyNamesEqual(mismatch.user.agencyName, mismatch.hierarchyEntry.agencyName)) {
               updates.agencyName = mismatch.hierarchyEntry.agencyName;
             }
             if ((mismatch.user.unitManager || '') !== (mismatch.hierarchyEntry.unitManager || '')) {
@@ -469,10 +629,10 @@ export default function HierarchyReviewPage() {
     }
   };
 
-  // Filter mismatches by agency
+  // Filter mismatches by agency (using normalized comparison)
   const filteredMismatches = selectedAgency === 'all' 
     ? mismatches 
-    : mismatches.filter(m => m.user.agencyName === selectedAgency);
+    : mismatches.filter(m => areAgencyNamesEqual(m.user.agencyName, selectedAgency));
 
   // Get unique agencies
   const agencies = Array.from(new Set([
@@ -510,12 +670,93 @@ export default function HierarchyReviewPage() {
               <h1 className="text-3xl font-bold text-slate-900 mb-2">Organizational Hierarchy Review</h1>
               <p className="text-slate-600">Review and fix mismatches between users and organizational hierarchy</p>
             </div>
-            <div className="flex gap-2">
+            <div className="flex gap-2 flex-wrap">
               <button
                 onClick={loadData}
                 className="px-4 py-2 bg-slate-600 text-white rounded-lg hover:bg-slate-700 transition-colors font-semibold"
               >
                 🔄 Refresh
+              </button>
+              <button
+                onClick={async () => {
+                  if (!confirm('Update hierarchy placements for Cebu-Ez Matunog Agency:\n- Jessica G. Baculan → Reports to SUM (Ma Emelyn D. Tan)\n- All other UMs → Report to ADD (Maria Estrella C. Matunog)\n\nThis includes:\n- Evelyn C. Mondero\n- Darlyn L. Perez\n- Mary Kate M. Academia\n- Archie S. Bigno\n- Virginia B. Iway\n\nUMs under SUMs (like Ranet L. Canu-OG under Hermelyn V. Simene) will not be changed.\n\nThis will update the organizational hierarchy entries.')) {
+                    return;
+                  }
+                  try {
+                    setActionLoading('update-placements');
+                    const response = await fetch('/api/admin/update-hierarchy-placement', {
+                      method: 'POST',
+                      headers: { 'Content-Type': 'application/json' },
+                      body: JSON.stringify({
+                        updates: [
+                          // Jessica Baculan reports to SUM Ma Emelyn D. Tan
+                          {
+                            name: 'JESSICA G. BACULAN',
+                            agencyName: 'CEBU-EZ MATUNOG AGENCY',
+                            reportsTo: 'MA EMELYN D. TAN'
+                          },
+                          // All other UMs report to ADD Maria Estrella C. Matunog
+                          {
+                            name: 'EVELYN C. MONDERO',
+                            agencyName: 'CEBU-EZ MATUNOG AGENCY',
+                            reportsTo: 'MARIA ESTRELLA C. MATUNOG'
+                          },
+                          {
+                            name: 'DARLYN L. PEREZ',
+                            agencyName: 'CEBU-EZ MATUNOG AGENCY',
+                            reportsTo: 'MARIA ESTRELLA C. MATUNOG'
+                          },
+                          {
+                            name: 'MARY KATE M. ACADEMIA',
+                            agencyName: 'CEBU-EZ MATUNOG AGENCY',
+                            reportsTo: 'MARIA ESTRELLA C. MATUNOG'
+                          },
+                          {
+                            name: 'ARCHIE S. BIGNO',
+                            agencyName: 'CEBU-EZ MATUNOG AGENCY',
+                            reportsTo: 'MARIA ESTRELLA C. MATUNOG'
+                          },
+                          {
+                            name: 'VIRGINIA B. IWAY',
+                            agencyName: 'CEBU-EZ MATUNOG AGENCY',
+                            reportsTo: 'MARIA ESTRELLA C. MATUNOG'
+                          },
+                          // Ranet Canu-OG reports to SUM Hermelyn V. Simene (already set, but include for clarity)
+                          {
+                            name: 'RANET L. CANU-OG',
+                            agencyName: 'CEBU-EZ MATUNOG AGENCY',
+                            reportsTo: 'HERMELYN V. SIMENE'
+                          }
+                        ]
+                      })
+                    });
+                    const result = await response.json();
+                    if (result.success) {
+                      alert(`Successfully updated ${result.summary.successful} hierarchy placements.`);
+                      await loadData();
+                    } else {
+                      alert(`Failed to update some placements. ${result.summary.failed} failed, ${result.summary.successful} succeeded. Check console for details.`);
+                      console.error('Update results:', result);
+                    }
+                  } catch (err) {
+                    alert(err instanceof Error ? err.message : 'Failed to update hierarchy placements');
+                  } finally {
+                    setActionLoading(null);
+                  }
+                }}
+                disabled={actionLoading === 'update-placements'}
+                className="px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition-colors font-semibold disabled:opacity-50 disabled:cursor-not-allowed"
+                title="Update hierarchy placements for Cebu-Ez Matunog Agency UMs"
+              >
+                {actionLoading === 'update-placements' ? 'Updating...' : 'Fix UM Hierarchy Placements'}
+              </button>
+              <button
+                onClick={handleSyncHierarchyFromData}
+                disabled={actionLoading === 'sync-hierarchy'}
+                className="px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition-colors font-semibold disabled:opacity-50 disabled:cursor-not-allowed"
+                title="Sync hierarchy entries from corrected hierarchy-data.ts file"
+              >
+                {actionLoading === 'sync-hierarchy' ? 'Syncing...' : 'Sync Hierarchy from Data'}
               </button>
               <button
                 onClick={handleSyncAllUsers}
@@ -526,13 +767,24 @@ export default function HierarchyReviewPage() {
                 {actionLoading === 'sync-all' ? 'Syncing...' : 'Sync All Users to Hierarchy'}
               </button>
               {mismatches.filter(m => m.issue !== 'missing_from_hierarchy' && m.hierarchyEntry).length > 0 && (
-                <button
-                  onClick={handleFixAll}
-                  disabled={actionLoading === 'fix-all'}
-                  className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors font-semibold disabled:opacity-50 disabled:cursor-not-allowed"
-                >
-                  {actionLoading === 'fix-all' ? 'Fixing...' : 'Fix All Fixable Issues'}
-                </button>
+                <>
+                  <button
+                    onClick={handleFixHierarchyToMatchUsers}
+                    disabled={actionLoading === 'fix-hierarchy'}
+                    className="px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition-colors font-semibold disabled:opacity-50 disabled:cursor-not-allowed"
+                    title="Update hierarchy entries to match user records (recommended if users are correct)"
+                  >
+                    {actionLoading === 'fix-hierarchy' ? 'Fixing...' : 'Fix Hierarchy to Match Users'}
+                  </button>
+                  <button
+                    onClick={handleFixAll}
+                    disabled={actionLoading === 'fix-all'}
+                    className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors font-semibold disabled:opacity-50 disabled:cursor-not-allowed"
+                    title="Update user records to match hierarchy entries"
+                  >
+                    {actionLoading === 'fix-all' ? 'Fixing...' : 'Fix Users to Match Hierarchy'}
+                  </button>
+                </>
               )}
             </div>
           </div>
@@ -622,17 +874,42 @@ export default function HierarchyReviewPage() {
                         </td>
                         <td className="p-4">
                           <div className="text-sm">
-                            {mismatch.expectedAgency && (
-                              <div>Agency: <span className="font-semibold">{mismatch.expectedAgency}</span></div>
-                            )}
-                            {mismatch.expectedUnitManager !== undefined && (
-                              <div>Unit Mgr: <span className="font-semibold">{formatDisplayName(mismatch.expectedUnitManager) || 'None'}</span></div>
-                            )}
-                            {mismatch.expectedRank && (
-                              <div>Rank: <span className="font-semibold">{mismatch.expectedRank}</span></div>
-                            )}
-                            {mismatch.issue === 'missing_from_hierarchy' && (
+                            {mismatch.issue === 'missing_from_hierarchy' ? (
                               <div className="text-red-600 italic">User not found in organizational hierarchy</div>
+                            ) : (
+                              <>
+                                <div className="text-xs text-slate-500 mb-1">(From Hierarchy Entry - may be outdated)</div>
+                                {mismatch.expectedAgency && (
+                                  <div>
+                                    Agency: <span className="font-semibold">{mismatch.expectedAgency}</span>
+                                    {!areAgencyNamesEqual(mismatch.user.agencyName, mismatch.expectedAgency) && (
+                                      <span className="ml-2 text-xs text-slate-500">
+                                        (User has: {mismatch.user.agencyName})
+                                      </span>
+                                    )}
+                                  </div>
+                                )}
+                                {mismatch.expectedUnitManager !== undefined && (
+                                  <div>
+                                    Unit Mgr: <span className="font-semibold">{formatDisplayName(mismatch.expectedUnitManager) || 'None'}</span>
+                                    {normalizeName(mismatch.user.unitManager || '') !== normalizeName(mismatch.expectedUnitManager || '') && (
+                                      <span className="ml-2 text-xs text-slate-500">
+                                        (User has: {formatDisplayName(mismatch.user.unitManager) || 'None'})
+                                      </span>
+                                    )}
+                                  </div>
+                                )}
+                                {mismatch.expectedRank && (
+                                  <div>
+                                    Rank: <span className="font-semibold">{mismatch.expectedRank}</span>
+                                    {mismatch.user.rank !== mismatch.expectedRank && (
+                                      <span className="ml-2 text-xs text-slate-500">
+                                        (User has: {mismatch.user.rank})
+                                      </span>
+                                    )}
+                                  </div>
+                                )}
+                              </>
                             )}
                           </div>
                         </td>
@@ -646,13 +923,24 @@ export default function HierarchyReviewPage() {
                               Add to Hierarchy
                             </button>
                           ) : mismatch.hierarchyEntry ? (
-                            <button
-                              onClick={() => handleFixUser(mismatch)}
-                              disabled={actionLoading !== null}
-                              className="px-3 py-1 bg-green-600 text-white rounded hover:bg-green-700 text-xs font-semibold disabled:opacity-50 disabled:cursor-not-allowed"
-                            >
-                              {actionLoading === `fix-${mismatch.user.uid}` ? 'Fixing...' : 'Fix'}
-                            </button>
+                            <div className="flex gap-2">
+                              <button
+                                onClick={() => handleFixUser(mismatch, true)}
+                                disabled={actionLoading !== null}
+                                className="px-3 py-1 bg-purple-600 text-white rounded hover:bg-purple-700 text-xs font-semibold disabled:opacity-50 disabled:cursor-not-allowed"
+                                title="Fix hierarchy entry to match user record"
+                              >
+                                {actionLoading === `fix-hierarchy-${mismatch.user.uid}` ? 'Fixing...' : 'Fix Hierarchy'}
+                              </button>
+                              <button
+                                onClick={() => handleFixUser(mismatch, false)}
+                                disabled={actionLoading !== null}
+                                className="px-3 py-1 bg-green-600 text-white rounded hover:bg-green-700 text-xs font-semibold disabled:opacity-50 disabled:cursor-not-allowed"
+                                title="Fix user record to match hierarchy entry"
+                              >
+                                {actionLoading === `fix-${mismatch.user.uid}` ? 'Fixing...' : 'Fix User'}
+                              </button>
+                            </div>
                           ) : (
                             <span className="text-xs text-slate-400">Manual review needed</span>
                           )}

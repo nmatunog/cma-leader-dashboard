@@ -68,90 +68,90 @@ export const HARDCODED_HIERARCHY_DATA: HierarchyEntryData[] = [
   
   // UMs under SUM Hermelyn V. Simene
   // Note: I/SIMENE/HERMELYN/V@ is the SUM herself, so we don't include her as a UM entry
-  { name: "JUDEZA F. BALISCO", displayName: "JUDEZA F. BALISCO", rank: "UM", unitManager: "HERMELYN V. SIMENE", agencyName: "CEBU-MATUNOG AGENCY" },
-  { name: "RANET L. CANU OG", displayName: "RANET L. CANU OG", rank: "UM", unitManager: "HERMELYN V. SIMENE", agencyName: "CEBU-MATUNOG AGENCY" },
-  { name: "NATHALIE ROSE E. COLIMBO", displayName: "NATHALIE ROSE E. COLIMBO", rank: "UM", unitManager: "HERMELYN V. SIMENE", agencyName: "CEBU-MATUNOG AGENCY" },
-  { name: "JEHZA F. ERAZO", displayName: "JEHZA F. ERAZO", rank: "UM", unitManager: "HERMELYN V. SIMENE", agencyName: "CEBU-MATUNOG AGENCY" },
-  { name: "JANICE I. NUNEZ", displayName: "JANICE I. NUNEZ", rank: "UM", unitManager: "HERMELYN V. SIMENE", agencyName: "CEBU-MATUNOG AGENCY" },
+  { name: "RANET L. CANU-OG", displayName: "RANET L. CANU-OG", rank: "UM", unitManager: "HERMELYN V. SIMENE", agencyName: "CEBU-EZ MATUNOG AGENCY" },
+  { name: "JEHZA F. ERAZO", displayName: "JEHZA F. ERAZO", rank: "UM", unitManager: "HERMELYN V. SIMENE", agencyName: "CEBU-EZ MATUNOG AGENCY" },
+  { name: "JANICE I. NUNEZ", displayName: "JANICE I. NUNEZ", rank: "UM", unitManager: "HERMELYN V. SIMENE", agencyName: "CEBU-EZ MATUNOG AGENCY" },
+  { name: "JUDEZA F. BALISCO", displayName: "JUDEZA F. BALISCO", rank: "UM", unitManager: "HERMELYN V. SIMENE", agencyName: "CEBU-EZ MATUNOG AGENCY" },
+  { name: "NATHALIE ROSE E. COLIMBO", displayName: "NATHALIE ROSE E. COLIMBO", rank: "UM", unitManager: "HERMELYN V. SIMENE", agencyName: "CEBU-EZ MATUNOG AGENCY" },
   
   // Direct Advisors reporting to SUM Hermelyn V. Simene
-  { name: "JAY B. ALOTA", displayName: "JAY B. ALOTA", rank: "ADV", unitManager: "HERMELYN V. SIMENE", agencyName: "CEBU-MATUNOG AGENCY" },
-  { name: "ROSEMARIE A. ANDUYAN", displayName: "ROSEMARIE A. ANDUYAN", rank: "ADV", unitManager: "HERMELYN V. SIMENE", agencyName: "CEBU-MATUNOG AGENCY" },
-  { name: "MARIA SHEILA A. ANUADA", displayName: "MARIA SHEILA A. ANUADA", rank: "ADV", unitManager: "HERMELYN V. SIMENE", agencyName: "CEBU-MATUNOG AGENCY" },
-  { name: "SUZANNE RAFAELA G. BILLONES", displayName: "SUZANNE RAFAELA G. BILLONES", rank: "ADV", unitManager: "HERMELYN V. SIMENE", agencyName: "CEBU-MATUNOG AGENCY" },
-  { name: "KEZIAH V. DELA CERNA", displayName: "KEZIAH V. DELA CERNA", rank: "ADV", unitManager: "HERMELYN V. SIMENE", agencyName: "CEBU-MATUNOG AGENCY" },
-  { name: "VICENTE MANUEL D. FARRARONS", displayName: "VICENTE MANUEL D. FARRARONS", rank: "ADV", unitManager: "HERMELYN V. SIMENE", agencyName: "CEBU-MATUNOG AGENCY" },
-  { name: "MAY V. RODIS", displayName: "MAY V. RODIS", rank: "ADV", unitManager: "HERMELYN V. SIMENE", agencyName: "CEBU-MATUNOG AGENCY" },
-  { name: "HELYN V. SARONA", displayName: "HELYN V. SARONA", rank: "ADV", unitManager: "HERMELYN V. SIMENE", agencyName: "CEBU-MATUNOG AGENCY" },
+  { name: "JAY B. ALOTA", displayName: "JAY B. ALOTA", rank: "ADV", unitManager: "HERMELYN V. SIMENE", agencyName: "CEBU-EZ MATUNOG AGENCY" },
+  { name: "ROSEMARIE A. ANDUYAN", displayName: "ROSEMARIE A. ANDUYAN", rank: "ADV", unitManager: "HERMELYN V. SIMENE", agencyName: "CEBU-EZ MATUNOG AGENCY" },
+  { name: "MARIA SHEILA A. ANUADA", displayName: "MARIA SHEILA A. ANUADA", rank: "ADV", unitManager: "HERMELYN V. SIMENE", agencyName: "CEBU-EZ MATUNOG AGENCY" },
+  { name: "SUZANNE RAFAELA G. BILLONES", displayName: "SUZANNE RAFAELA G. BILLONES", rank: "ADV", unitManager: "HERMELYN V. SIMENE", agencyName: "CEBU-EZ MATUNOG AGENCY" },
+  { name: "KEZIAH V. DELA CERNA", displayName: "KEZIAH V. DELA CERNA", rank: "ADV", unitManager: "HERMELYN V. SIMENE", agencyName: "CEBU-EZ MATUNOG AGENCY" },
+  { name: "VICENTE MANUEL D. FARRARONS", displayName: "VICENTE MANUEL D. FARRARONS", rank: "ADV", unitManager: "HERMELYN V. SIMENE", agencyName: "CEBU-EZ MATUNOG AGENCY" },
+  { name: "MAY V. RODIS", displayName: "MAY V. RODIS", rank: "ADV", unitManager: "HERMELYN V. SIMENE", agencyName: "CEBU-EZ MATUNOG AGENCY" },
+  { name: "HELYN V. SARONA", displayName: "HELYN V. SARONA", rank: "ADV", unitManager: "HERMELYN V. SIMENE", agencyName: "CEBU-EZ MATUNOG AGENCY" },
   
   // Advisors under UM Judeza F. Balisco
-  { name: "MICHAEL M. BALISCO", displayName: "MICHAEL M. BALISCO", rank: "ADV", unitManager: "JUDEZA F. BALISCO", agencyName: "CEBU-MATUNOG AGENCY" },
-  { name: "INEE KRISTINE B. FRANCISCO", displayName: "INEE KRISTINE B. FRANCISCO", rank: "ADV", unitManager: "JUDEZA F. BALISCO", agencyName: "CEBU-MATUNOG AGENCY" },
-  { name: "JULIET F. JOSEPH", displayName: "JULIET F. JOSEPH", rank: "ADV", unitManager: "JUDEZA F. BALISCO", agencyName: "CEBU-MATUNOG AGENCY" },
-  { name: "ARNIEL F. RODRIGUEZ", displayName: "ARNIEL F. RODRIGUEZ", rank: "ADV", unitManager: "JUDEZA F. BALISCO", agencyName: "CEBU-MATUNOG AGENCY" },
+  { name: "MICHAEL M. BALISCO", displayName: "MICHAEL M. BALISCO", rank: "ADV", unitManager: "JUDEZA F. BALISCO", agencyName: "CEBU-EZ MATUNOG AGENCY" },
+  { name: "INEE KRISTINE B. FRANCISCO", displayName: "INEE KRISTINE B. FRANCISCO", rank: "ADV", unitManager: "JUDEZA F. BALISCO", agencyName: "CEBU-EZ MATUNOG AGENCY" },
+  { name: "JULIET F. JOSEPH", displayName: "JULIET F. JOSEPH", rank: "ADV", unitManager: "JUDEZA F. BALISCO", agencyName: "CEBU-EZ MATUNOG AGENCY" },
+  { name: "ARNIEL F. RODRIGUEZ", displayName: "ARNIEL F. RODRIGUEZ", rank: "ADV", unitManager: "JUDEZA F. BALISCO", agencyName: "CEBU-EZ MATUNOG AGENCY" },
   
-  // Advisors under UM Ranet L. Canu OG
-  // Note: I/CANU OG/RANET/L@ is the UM herself, so we don't include her as an advisor entry
-  { name: "EMMA P. ALQUISALAS", displayName: "EMMA P. ALQUISALAS", rank: "ADV", unitManager: "RANET L. CANU OG", agencyName: "CEBU-MATUNOG AGENCY" },
-  { name: "DIVINA A. AMPARO", displayName: "DIVINA A. AMPARO", rank: "ADV", unitManager: "RANET L. CANU OG", agencyName: "CEBU-MATUNOG AGENCY" },
-  { name: "ANA LOU C. CABALLERO", displayName: "ANA LOU C. CABALLERO", rank: "ADV", unitManager: "RANET L. CANU OG", agencyName: "CEBU-MATUNOG AGENCY" },
-  { name: "ARLENE P. CANETE", displayName: "ARLENE P. CANETE", rank: "ADV", unitManager: "RANET L. CANU OG", agencyName: "CEBU-MATUNOG AGENCY" },
-  { name: "NIEL B. CANU-OG", displayName: "NIEL B. CANU-OG", rank: "ADV", unitManager: "RANET L. CANU OG", agencyName: "CEBU-MATUNOG AGENCY" },
-  { name: "RUTH U. PAGARAO", displayName: "RUTH U. PAGARAO", rank: "ADV", unitManager: "RANET L. CANU OG", agencyName: "CEBU-MATUNOG AGENCY" },
-  { name: "NIDA M. PILAPIL", displayName: "NIDA M. PILAPIL", rank: "ADV", unitManager: "RANET L. CANU OG", agencyName: "CEBU-MATUNOG AGENCY" },
-  { name: "JANICE S. PINILI", displayName: "JANICE S. PINILI", rank: "ADV", unitManager: "RANET L. CANU OG", agencyName: "CEBU-MATUNOG AGENCY" },
-  { name: "ALDEMIOLA C. VICTORIANO", displayName: "ALDEMIOLA C. VICTORIANO", rank: "ADV", unitManager: "RANET L. CANU OG", agencyName: "CEBU-MATUNOG AGENCY" },
+  // Advisors under UM Ranet L. Canu-OG
+  // Note: I/CANU-OG/RANET/L@ is the UM herself, so we don't include her as an advisor entry
+  { name: "EMMA P. ALQUISALAS", displayName: "EMMA P. ALQUISALAS", rank: "ADV", unitManager: "RANET L. CANU-OG", agencyName: "CEBU-EZ MATUNOG AGENCY" },
+  { name: "DIVINA A. AMPARO", displayName: "DIVINA A. AMPARO", rank: "ADV", unitManager: "RANET L. CANU-OG", agencyName: "CEBU-EZ MATUNOG AGENCY" },
+  { name: "ANA LOU C. CABALLERO", displayName: "ANA LOU C. CABALLERO", rank: "ADV", unitManager: "RANET L. CANU-OG", agencyName: "CEBU-EZ MATUNOG AGENCY" },
+  { name: "ARLENE P. CANETE", displayName: "ARLENE P. CANETE", rank: "ADV", unitManager: "RANET L. CANU-OG", agencyName: "CEBU-EZ MATUNOG AGENCY" },
+  { name: "NIEL B. CANU-OG", displayName: "NIEL B. CANU-OG", rank: "ADV", unitManager: "RANET L. CANU-OG", agencyName: "CEBU-EZ MATUNOG AGENCY" },
+  { name: "RUTH U. PAGARAO", displayName: "RUTH U. PAGARAO", rank: "ADV", unitManager: "RANET L. CANU-OG", agencyName: "CEBU-EZ MATUNOG AGENCY" },
+  { name: "NIDA M. PILAPIL", displayName: "NIDA M. PILAPIL", rank: "ADV", unitManager: "RANET L. CANU-OG", agencyName: "CEBU-EZ MATUNOG AGENCY" },
+  { name: "JANICE S. PINILI", displayName: "JANICE S. PINILI", rank: "ADV", unitManager: "RANET L. CANU-OG", agencyName: "CEBU-EZ MATUNOG AGENCY" },
+  { name: "ALDEMIOLA C. VICTORIANO", displayName: "ALDEMIOLA C. VICTORIANO", rank: "ADV", unitManager: "RANET L. CANU-OG", agencyName: "CEBU-EZ MATUNOG AGENCY" },
   
   // Advisors under UM Nathalie Rose E. Colimbo
   // Note: I/COLIMBO/NATHALIE ROSE/E@ is the UM herself, so we don't include her as an advisor entry
-  { name: "MAY THERESE SUNSHINE S. BELLEZA", displayName: "MAY THERESE SUNSHINE S. BELLEZA", rank: "ADV", unitManager: "NATHALIE ROSE E. COLIMBO", agencyName: "CEBU-MATUNOG AGENCY" },
-  { name: "LOUIE T. COLIMBO", displayName: "LOUIE T. COLIMBO", rank: "ADV", unitManager: "NATHALIE ROSE E. COLIMBO", agencyName: "CEBU-MATUNOG AGENCY" },
-  { name: "SOPHIA DOMINIQUE ROSE E. COLIMBO", displayName: "SOPHIA DOMINIQUE ROSE E. COLIMBO", rank: "ADV", unitManager: "NATHALIE ROSE E. COLIMBO", agencyName: "CEBU-MATUNOG AGENCY" },
-  { name: "REYNALDO M. ERAZO", displayName: "REYNALDO M. ERAZO", rank: "ADV", unitManager: "NATHALIE ROSE E. COLIMBO", agencyName: "CEBU-MATUNOG AGENCY" },
-  { name: "RINA KLAIRE D. FERROLINO", displayName: "RINA KLAIRE D. FERROLINO", rank: "ADV", unitManager: "NATHALIE ROSE E. COLIMBO", agencyName: "CEBU-MATUNOG AGENCY" },
-  { name: "GLENDA C. MARCUELO", displayName: "GLENDA C. MARCUELO", rank: "ADV", unitManager: "NATHALIE ROSE E. COLIMBO", agencyName: "CEBU-MATUNOG AGENCY" },
-  { name: "ELMAR Y. VILLAHERMOSA", displayName: "ELMAR Y. VILLAHERMOSA", rank: "ADV", unitManager: "NATHALIE ROSE E. COLIMBO", agencyName: "CEBU-MATUNOG AGENCY" },
+  { name: "MAY THERESE SUNSHINE S. BELLEZA", displayName: "MAY THERESE SUNSHINE S. BELLEZA", rank: "ADV", unitManager: "NATHALIE ROSE E. COLIMBO", agencyName: "CEBU-EZ MATUNOG AGENCY" },
+  { name: "LOUIE T. COLIMBO", displayName: "LOUIE T. COLIMBO", rank: "ADV", unitManager: "NATHALIE ROSE E. COLIMBO", agencyName: "CEBU-EZ MATUNOG AGENCY" },
+  { name: "SOPHIA DOMINIQUE ROSE E. COLIMBO", displayName: "SOPHIA DOMINIQUE ROSE E. COLIMBO", rank: "ADV", unitManager: "NATHALIE ROSE E. COLIMBO", agencyName: "CEBU-EZ MATUNOG AGENCY" },
+  { name: "REYNALDO M. ERAZO", displayName: "REYNALDO M. ERAZO", rank: "ADV", unitManager: "NATHALIE ROSE E. COLIMBO", agencyName: "CEBU-EZ MATUNOG AGENCY" },
+  { name: "RINA KLAIRE D. FERROLINO", displayName: "RINA KLAIRE D. FERROLINO", rank: "ADV", unitManager: "NATHALIE ROSE E. COLIMBO", agencyName: "CEBU-EZ MATUNOG AGENCY" },
+  { name: "GLENDA C. MARCUELO", displayName: "GLENDA C. MARCUELO", rank: "ADV", unitManager: "NATHALIE ROSE E. COLIMBO", agencyName: "CEBU-EZ MATUNOG AGENCY" },
+  { name: "ELMAR Y. VILLAHERMOSA", displayName: "ELMAR Y. VILLAHERMOSA", rank: "ADV", unitManager: "NATHALIE ROSE E. COLIMBO", agencyName: "CEBU-EZ MATUNOG AGENCY" },
   
   // Advisors under UM Jehza F. Erazo
   // Note: I/ERAZO/JEHZA/F@ is the UM herself, so we don't include her as an advisor entry
-  { name: "JO-ANN A. BATION", displayName: "JO-ANN A. BATION", rank: "ADV", unitManager: "JEHZA F. ERAZO", agencyName: "CEBU-MATUNOG AGENCY" },
-  { name: "MICHELLE Y. PERALTA", displayName: "MICHELLE Y. PERALTA", rank: "ADV", unitManager: "JEHZA F. ERAZO", agencyName: "CEBU-MATUNOG AGENCY" },
-  { name: "DIOSCORA A. TANGPUS", displayName: "DIOSCORA A. TANGPUS", rank: "ADV", unitManager: "JEHZA F. ERAZO", agencyName: "CEBU-MATUNOG AGENCY" },
-  { name: "MIRA FE P. TANGUB", displayName: "MIRA FE P. TANGUB", rank: "ADV", unitManager: "JEHZA F. ERAZO", agencyName: "CEBU-MATUNOG AGENCY" },
+  { name: "JO-ANN A. BATION", displayName: "JO-ANN A. BATION", rank: "ADV", unitManager: "JEHZA F. ERAZO", agencyName: "CEBU-EZ MATUNOG AGENCY" },
+  { name: "MICHELLE Y. PERALTA", displayName: "MICHELLE Y. PERALTA", rank: "ADV", unitManager: "JEHZA F. ERAZO", agencyName: "CEBU-EZ MATUNOG AGENCY" },
+  { name: "DIOSCORA A. TANGPUS", displayName: "DIOSCORA A. TANGPUS", rank: "ADV", unitManager: "JEHZA F. ERAZO", agencyName: "CEBU-EZ MATUNOG AGENCY" },
+  { name: "MIRA FE P. TANGUB", displayName: "MIRA FE P. TANGUB", rank: "ADV", unitManager: "JEHZA F. ERAZO", agencyName: "CEBU-EZ MATUNOG AGENCY" },
   
   // Advisors under UM Janice I. Nunez
   // Note: I/NUNEZ/JANICE/I@ is the UM herself, so we don't include her as an advisor entry
-  { name: "HILARIO J. BLANCO", displayName: "HILARIO J. BLANCO", rank: "ADV", unitManager: "JANICE I. NUNEZ", agencyName: "CEBU-MATUNOG AGENCY" },
-  { name: "MAYLINDA S. BLANCO", displayName: "MAYLINDA S. BLANCO", rank: "ADV", unitManager: "JANICE I. NUNEZ", agencyName: "CEBU-MATUNOG AGENCY" },
-  { name: "JORY NEIL A. PACTORES", displayName: "JORY NEIL A. PACTORES", rank: "ADV", unitManager: "JANICE I. NUNEZ", agencyName: "CEBU-MATUNOG AGENCY" },
+  { name: "HILARIO J. BLANCO", displayName: "HILARIO J. BLANCO", rank: "ADV", unitManager: "JANICE I. NUNEZ", agencyName: "CEBU-EZ MATUNOG AGENCY" },
+  { name: "MAYLINDA S. BLANCO", displayName: "MAYLINDA S. BLANCO", rank: "ADV", unitManager: "JANICE I. NUNEZ", agencyName: "CEBU-EZ MATUNOG AGENCY" },
+  { name: "JORY NEIL A. PACTORES", displayName: "JORY NEIL A. PACTORES", rank: "ADV", unitManager: "JANICE I. NUNEZ", agencyName: "CEBU-EZ MATUNOG AGENCY" },
   
   // Direct advisors under SUM Ma Emelyn D. Tan
   // Note: I/TAN/MA EMELYN/D@ is the SUM herself, so we don't include her as an advisor entry
-  { name: "MA ANGELICA M. AMBRAD", displayName: "MA ANGELICA M. AMBRAD", rank: "ADV", unitManager: "MA EMELYN D. TAN", agencyName: "CEBU-MATUNOG AGENCY" },
-  { name: "NINA G. BOLINGOT", displayName: "NINA G. BOLINGOT", rank: "ADV", unitManager: "MA EMELYN D. TAN", agencyName: "CEBU-MATUNOG AGENCY" },
-  { name: "GEOFFREY RALPH C. BUOT", displayName: "GEOFFREY RALPH C. BUOT", rank: "ADV", unitManager: "MA EMELYN D. TAN", agencyName: "CEBU-MATUNOG AGENCY" },
-  { name: "FERL ANN P. FRANZA", displayName: "FERL ANN P. FRANZA", rank: "ADV", unitManager: "MA EMELYN D. TAN", agencyName: "CEBU-MATUNOG AGENCY" },
-  { name: "ANGELINA B. MIER", displayName: "ANGELINA B. MIER", rank: "ADV", unitManager: "MA EMELYN D. TAN", agencyName: "CEBU-MATUNOG AGENCY" },
-  { name: "MA THERESA B. MIER", displayName: "MA THERESA B. MIER", rank: "ADV", unitManager: "MA EMELYN D. TAN", agencyName: "CEBU-MATUNOG AGENCY" },
-  { name: "JENIFER C. ORTEGA", displayName: "JENIFER C. ORTEGA", rank: "ADV", unitManager: "MA EMELYN D. TAN", agencyName: "CEBU-MATUNOG AGENCY" },
-  { name: "KENNETH T. QUINANOLA", displayName: "KENNETH T. QUINANOLA", rank: "ADV", unitManager: "MA EMELYN D. TAN", agencyName: "CEBU-MATUNOG AGENCY" },
-  { name: "JENYLIN V. ROCES", displayName: "JENYLIN V. ROCES", rank: "ADV", unitManager: "MA EMELYN D. TAN", agencyName: "CEBU-MATUNOG AGENCY" },
-  { name: "BELGRADE E. RUSSEL", displayName: "BELGRADE E. RUSSEL", rank: "ADV", unitManager: "MA EMELYN D. TAN", agencyName: "CEBU-MATUNOG AGENCY" },
-  { name: "GESELLE B. SACLOT", displayName: "GESELLE B. SACLOT", rank: "ADV", unitManager: "MA EMELYN D. TAN", agencyName: "CEBU-MATUNOG AGENCY" },
-  { name: "MICO B. SACLOT", displayName: "MICO B. SACLOT", rank: "ADV", unitManager: "MA EMELYN D. TAN", agencyName: "CEBU-MATUNOG AGENCY" },
-  { name: "GENEVIC C. TABILIRAN", displayName: "GENEVIC C. TABILIRAN", rank: "ADV", unitManager: "MA EMELYN D. TAN", agencyName: "CEBU-MATUNOG AGENCY" },
-  { name: "JASMIN P. UY", displayName: "JASMIN P. UY", rank: "ADV", unitManager: "MA EMELYN D. TAN", agencyName: "CEBU-MATUNOG AGENCY" },
-  { name: "HONEY GRACE B. ZUNIEGA", displayName: "HONEY GRACE B. ZUNIEGA", rank: "ADV", unitManager: "MA EMELYN D. TAN", agencyName: "CEBU-MATUNOG AGENCY" },
+  { name: "MA ANGELICA M. AMBRAD", displayName: "MA ANGELICA M. AMBRAD", rank: "ADV", unitManager: "MA EMELYN D. TAN", agencyName: "CEBU-EZ MATUNOG AGENCY" },
+  { name: "NINA G. BOLINGOT", displayName: "NINA G. BOLINGOT", rank: "ADV", unitManager: "MA EMELYN D. TAN", agencyName: "CEBU-EZ MATUNOG AGENCY" },
+  { name: "GEOFFREY RALPH C. BUOT", displayName: "GEOFFREY RALPH C. BUOT", rank: "ADV", unitManager: "MA EMELYN D. TAN", agencyName: "CEBU-EZ MATUNOG AGENCY" },
+  { name: "FERL ANN P. FRANZA", displayName: "FERL ANN P. FRANZA", rank: "ADV", unitManager: "MA EMELYN D. TAN", agencyName: "CEBU-EZ MATUNOG AGENCY" },
+  { name: "ANGELINA B. MIER", displayName: "ANGELINA B. MIER", rank: "ADV", unitManager: "MA EMELYN D. TAN", agencyName: "CEBU-EZ MATUNOG AGENCY" },
+  { name: "MA THERESA B. MIER", displayName: "MA THERESA B. MIER", rank: "ADV", unitManager: "MA EMELYN D. TAN", agencyName: "CEBU-EZ MATUNOG AGENCY" },
+  { name: "JENIFER C. ORTEGA", displayName: "JENIFER C. ORTEGA", rank: "ADV", unitManager: "MA EMELYN D. TAN", agencyName: "CEBU-EZ MATUNOG AGENCY" },
+  { name: "KENNETH T. QUINANOLA", displayName: "KENNETH T. QUINANOLA", rank: "ADV", unitManager: "MA EMELYN D. TAN", agencyName: "CEBU-EZ MATUNOG AGENCY" },
+  { name: "JENYLIN V. ROCES", displayName: "JENYLIN V. ROCES", rank: "ADV", unitManager: "MA EMELYN D. TAN", agencyName: "CEBU-EZ MATUNOG AGENCY" },
+  { name: "BELGRADE E. RUSSEL", displayName: "BELGRADE E. RUSSEL", rank: "ADV", unitManager: "MA EMELYN D. TAN", agencyName: "CEBU-EZ MATUNOG AGENCY" },
+  { name: "GESELLE B. SACLOT", displayName: "GESELLE B. SACLOT", rank: "ADV", unitManager: "MA EMELYN D. TAN", agencyName: "CEBU-EZ MATUNOG AGENCY" },
+  { name: "MICO B. SACLOT", displayName: "MICO B. SACLOT", rank: "ADV", unitManager: "MA EMELYN D. TAN", agencyName: "CEBU-EZ MATUNOG AGENCY" },
+  { name: "GENEVIC C. TABILIRAN", displayName: "GENEVIC C. TABILIRAN", rank: "ADV", unitManager: "MA EMELYN D. TAN", agencyName: "CEBU-EZ MATUNOG AGENCY" },
+  { name: "JASMIN P. UY", displayName: "JASMIN P. UY", rank: "ADV", unitManager: "MA EMELYN D. TAN", agencyName: "CEBU-EZ MATUNOG AGENCY" },
+  { name: "HONEY GRACE B. ZUNIEGA", displayName: "HONEY GRACE B. ZUNIEGA", rank: "ADV", unitManager: "MA EMELYN D. TAN", agencyName: "CEBU-EZ MATUNOG AGENCY" },
   
   // UMs under SUM Ma Emelyn D. Tan
   // Note: I/TAN/MA EMELYN/D@ is the SUM herself, so we don't include her as a UM entry
-  { name: "JESSICA G. BACULAN", displayName: "JESSICA G. BACULAN", rank: "UM", unitManager: "MA EMELYN D. TAN", agencyName: "CEBU-MATUNOG AGENCY" },
+  { name: "JESSICA G. BACULAN", displayName: "JESSICA G. BACULAN", rank: "UM", unitManager: "MA EMELYN D. TAN", agencyName: "CEBU-EZ MATUNOG AGENCY" },
   
   // Advisors under UM Jessica G. Baculan
   // Note: I/BACULAN/JESSICA/G@ is the UM herself, so we don't include her as an advisor entry
-  { name: "VANIZA C. BASCAO", displayName: "VANIZA C. BASCAO", rank: "ADV", unitManager: "JESSICA G. BACULAN", agencyName: "CEBU-MATUNOG AGENCY" },
-  { name: "ALNIE JANE S. DAANOY", displayName: "ALNIE JANE S. DAANOY", rank: "ADV", unitManager: "JESSICA G. BACULAN", agencyName: "CEBU-MATUNOG AGENCY" },
-  { name: "GREGOR U. GACUS", displayName: "GREGOR U. GACUS", rank: "ADV", unitManager: "JESSICA G. BACULAN", agencyName: "CEBU-MATUNOG AGENCY" },
+  { name: "VANIZA C. BASCAO", displayName: "VANIZA C. BASCAO", rank: "ADV", unitManager: "JESSICA G. BACULAN", agencyName: "CEBU-EZ MATUNOG AGENCY" },
+  { name: "ALNIE JANE S. DAANOY", displayName: "ALNIE JANE S. DAANOY", rank: "ADV", unitManager: "JESSICA G. BACULAN", agencyName: "CEBU-EZ MATUNOG AGENCY" },
+  { name: "GREGOR U. GACUS", displayName: "GREGOR U. GACUS", rank: "ADV", unitManager: "JESSICA G. BACULAN", agencyName: "CEBU-EZ MATUNOG AGENCY" },
   
   // Direct advisors under District Director Maria Estrella C. Matunog
   // Note: I/MATUNOG/MARIA ESTRELLA/C@ is the District Director herself, so we don't include her as an advisor entry

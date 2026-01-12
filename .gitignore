@@ -26,6 +26,10 @@ yarn-error.log*
 
 # local env files
 .env*.local
+
+# Firebase service account key (contains sensitive credentials)
+serviceAccountKey.json
+*.serviceAccountKey.json
 .env
 netlify-env-variables.txt
 

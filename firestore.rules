@@ -12,13 +12,37 @@ service cloud.firestore {
              (get(/databases/$(database)/documents/users/$(request.auth.uid)).data.isActive != false);
     }
     
-    // Helper function to check if current user is viewer (read-only access)
+    // Helper function to check if current user is admin-viewer (read-only access)
     // Only use AFTER user can read their own document (no circular dependency)
-    function isViewer() {
-      return request.auth != null &&
+    function isAdminViewer() {
+      return request.auth != null && 
              exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
-             get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'viewer' &&
+             get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin-viewer' &&
              (get(/databases/$(database)/documents/users/$(request.auth.uid)).data.isActive != false);
+    }
+    
+    // Helper function to check if current user is a leader (ADD, SUM, UM)
+    // Only use AFTER user can read their own document (no circular dependency)
+    function isLeader() {
+      return request.auth != null && 
+             exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
+             get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'leader' &&
+             (get(/databases/$(database)/documents/users/$(request.auth.uid)).data.isActive != false);
+    }
+    
+    // Helper function to get user's agency name
+    // Only use AFTER user can read their own document (no circular dependency)
+    function getUserAgency() {
+      return get(/databases/$(database)/documents/users/$(request.auth.uid)).data.agencyName;
+    }
+    
+    // Helper function to check if two agency names match (case-insensitive)
+    // Note: Firestore rules don't support .toUpperCase() directly, so we check common variations
+    function agencyNamesMatch(name1, name2) {
+      // Exact match
+      return name1 == name2 ||
+             // Case-insensitive match (convert both to uppercase for comparison)
+             (name1.toUpperCase().trim() == name2.toUpperCase().trim());
     }
     // Helper function to check if current user is superuser
     function isSuperuser() {
@@ -43,7 +67,7 @@ service cloud.firestore {
       allow read: if request.auth != null && request.auth.uid == userId;
       
       // Admins and viewers can read all users (viewers have read-only access)
-      allow read: if isAdmin() || isViewer();
+      allow read: if isAdmin() || isAdminViewer();
       
       // Allow users to create their own user document (for self-signup)
       // Allow setup page to create first admin (request.auth == null for initial setup)
@@ -78,20 +102,39 @@ service cloud.firestore {
     
     // Strategic planning goals collection
     match /strategic_planning_goals/{goalId} {
-      // Users can read/write their own goals
-      allow read, write: if request.auth != null && 
-                        isActive() &&
-                        resource.data.userId == request.auth.uid;
+      // Users can read their own goals
+      allow read: if request.auth != null && 
+                 isActive() &&
+                 resource.data.userId == request.auth.uid;
+      
+      // Users can update/delete their own goals
+      allow update, delete: if request.auth != null && 
+                           isActive() &&
+                           resource.data.userId == request.auth.uid;
+      
+      // Users can create their own goals
+      allow create: if request.auth != null && 
+                   isActive() &&
+                   request.resource.data.userId == request.auth.uid;
       
       // Admins can read/write all goals
       allow read, write: if isAdmin() && isActive();
       
-      // Viewers can read all goals (read-only access)
-      allow read: if isViewer() && isActive();
-      // On create, ensure userId matches authenticated user (unless admin)
-      allow create: if request.auth != null && 
-                    isActive() &&
-                    (request.resource.data.userId == request.auth.uid || isAdmin());
+      // Admin-viewers can read all goals (read-only access)
+      allow read: if isAdminViewer() && isActive();
+      
+      // Leaders (ADD, SUM, UM) can read goals from their agency
+      // Use helper function for case-insensitive matching
+      allow read: if isLeader() && isActive() && 
+                  agencyNamesMatch(resource.data.agencyName, getUserAgency());
+      
+      // Leaders (ADD, SUM, UM) can create their own goals
+      allow create: if isLeader() && isActive() && 
+                   request.resource.data.userId == request.auth.uid;
+      
+      // Leaders (ADD, SUM, UM) can update/delete their own goals
+      allow update, delete: if isLeader() && isActive() && 
+                           resource.data.userId == request.auth.uid;
     }
     
     // Data collection (dashboard data)

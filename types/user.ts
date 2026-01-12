@@ -4,8 +4,8 @@
 
 import { Timestamp } from 'firebase/firestore';
 
-export type UserRole = 'superuser' | 'admin' | 'leader' | 'advisor' | 'viewer';
-export type UserRank = 'ADMIN' | 'ADD' | 'SUM' | 'UM' | 'AUM' | 'ADV' | 'VIEWER';
+export type UserRole = 'superuser' | 'admin' | 'leader' | 'advisor' | 'admin-viewer';
+export type UserRank = 'ADMIN' | 'ADD' | 'SUM' | 'UM' | 'AUM' | 'ADV' | 'ADMIN-VIEWER';
 
 export interface User {
   uid: string;                    // Firebase Auth UID (document ID)
@@ -66,5 +66,4 @@ export interface UserPermissions {
   canEditAllGoals: boolean;
   canViewAllAgencies: boolean;
 }
-
 

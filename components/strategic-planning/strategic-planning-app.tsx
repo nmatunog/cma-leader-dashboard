@@ -12,7 +12,6 @@ import { GoalSettingTab } from './tabs/goal-setting-tab';
 import { useAuth } from '@/contexts/auth-context';
 import { signOutUser } from '@/lib/auth-service';
 import { getUserPermissions } from '@/lib/user-service';
-import { generateActivityPlanningPDF } from './utils/activity-planning-pdf';
 
 export interface UserState {
   role: 'advisor' | 'leader' | 'admin';
@@ -37,15 +36,6 @@ export function StrategicPlanningApp({ initialTab, initialView }: StrategicPlann
   const [aiModalContent, setAIModalContent] = useState('');
   const [aiModalTitle, setAIModalTitle] = useState('AI Assistant');
   const [isAILoading, setIsAILoading] = useState(false);
-  const [activityPlanningContext, setActivityPlanningContext] = useState<{
-    personalFYC: number;
-    activeRecruits: number;
-    tenuredCount: number;
-    tenuredProd: number;
-    newCount: number;
-    newProd: number;
-    persistency: number;
-  } | null>(null);
   const [simulationData, setSimulationData] = useState<{
     personalFYC?: number;
     tenuredCount?: number;
@@ -126,81 +116,6 @@ export function StrategicPlanningApp({ initialTab, initialView }: StrategicPlann
     setShowAIModal(true);
   };
 
-  const handleActivityPlanning = async (context: {
-    personalFYC: number;
-    activeRecruits: number;
-    tenuredCount: number;
-    tenuredProd: number;
-    newCount: number;
-    newProd: number;
-    persistency: number;
-  }) => {
-    if (!userState) return;
-
-    // Store context for PDF generation
-    setActivityPlanningContext(context);
-
-    setIsAILoading(true);
-    setShowAIModal(true);
-    setAIModalTitle('AI Assisted Activity Planning');
-    setAIModalContent('Generating your personalized activity plan...');
-
-    try {
-      const response = await fetch('/api/ai/activity-planning', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          context: {
-            leaderName: userState.name,
-            rank: userState.rank,
-            agency: userState.agency,
-            personalFYC: context.personalFYC,
-            activeRecruits: context.activeRecruits,
-            tenuredCount: context.tenuredCount,
-            tenuredProd: context.tenuredProd,
-            newCount: context.newCount,
-            newProd: context.newProd,
-            persistency: context.persistency,
-          },
-        }),
-      });
-
-      const data = await response.json();
-
-      if (data.success && data.response) {
-        setAIModalContent(data.response);
-      } else {
-        setAIModalContent(`Error: ${data.error || 'Failed to generate activity plan. Please try again.'}`);
-        setActivityPlanningContext(null); // Clear context on error
-      }
-    } catch (error) {
-      console.error('Error generating activity plan:', error);
-      setAIModalContent('Error: Failed to generate activity plan. Please try again.');
-      setActivityPlanningContext(null); // Clear context on error
-    } finally {
-      setIsAILoading(false);
-    }
-  };
-
-  const handleDownloadActivityPlanPDF = () => {
-    if (!userState || !activityPlanningContext || !aiModalContent) return;
-
-    generateActivityPlanningPDF({
-      leaderName: userState.name,
-      rank: userState.rank,
-      agency: userState.agency,
-      content: aiModalContent,
-      personalFYC: activityPlanningContext.personalFYC,
-      activeRecruits: activityPlanningContext.activeRecruits,
-      tenuredCount: activityPlanningContext.tenuredCount,
-      tenuredProd: activityPlanningContext.tenuredProd,
-      newCount: activityPlanningContext.newCount,
-      newProd: activityPlanningContext.newProd,
-      persistency: activityPlanningContext.persistency,
-    });
-  };
 
   // Show loading state while checking auth
   if (loading) {
@@ -339,7 +254,6 @@ export function StrategicPlanningApp({ initialTab, initialView }: StrategicPlann
         {activeTab === 'leader' && (
           <LeaderHQTab 
             userState={userState} 
-            onGenerateRecruitmentAd={handleActivityPlanning}
             onPushToGoals={(data) => {
               console.log('onPushToGoals called with data (leader):', data);
               setSimulationData(data);
@@ -367,8 +281,8 @@ export function StrategicPlanningApp({ initialTab, initialView }: StrategicPlann
         onClose={() => setShowAIModal(false)}
         title={aiModalTitle}
         content={aiModalContent}
-        showDownloadButton={aiModalTitle === 'AI Assisted Activity Planning' && activityPlanningContext !== null && !isAILoading}
-        onDownloadPDF={handleDownloadActivityPlanPDF}
+        showDownloadButton={false}
+        onDownloadPDF={undefined}
       />
     </>
   );

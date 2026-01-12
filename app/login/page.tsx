@@ -22,7 +22,7 @@ export default function LoginPage() {
   // Redirect if already logged in
   useEffect(() => {
     if (!loading && user) {
-      if (user.role === 'admin' || user.role === 'superuser' || user.role === 'viewer') {
+      if (user.role === 'admin' || user.role === 'superuser' || user.role === 'admin-viewer') {
         router.push('/reports');
       } else {
         router.push('/strategic-planning');
@@ -52,7 +52,7 @@ export default function LoginPage() {
         }
         
         // Redirect based on role
-        if (result.user.role === 'admin' || result.user.role === 'superuser' || result.user.role === 'viewer') {
+        if (result.user.role === 'admin' || result.user.role === 'superuser' || result.user.role === 'admin-viewer') {
           router.push('/reports');
         } else {
           router.push('/strategic-planning');
