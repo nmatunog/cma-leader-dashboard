@@ -516,6 +516,27 @@ export function GoalSettingTab({ userState, originalUserRole, onShowAI, simulati
     q1Recruits, q2Recruits, q3Recruits, q4Recruits, // Leader Recruits
   ]);
 
+  // Auto-populate quarterly FYC from monthly Personal FYC for advisors
+  // Use ref to track last auto-populated value to avoid infinite loops
+  const lastAutoPopulatedMonthlyFYC = useRef<number | null>(null);
+  
+  useEffect(() => {
+    if (!isLeader && monthlyGoalFYC && monthlyGoalFYC.trim() !== '') {
+      const monthlyFYCValue = parseCommaNumber(monthlyGoalFYC);
+      if (monthlyFYCValue > 0 && monthlyFYCValue !== lastAutoPopulatedMonthlyFYC.current) {
+        // Always auto-populate quarterly values from monthly (quarterly = monthly * 3)
+        const quarterlyFYC = Math.round(monthlyFYCValue * 3);
+        const quarterlyFYCFormatted = formatNumberWithCommas(quarterlyFYC.toString());
+        setQ1FYC(quarterlyFYCFormatted);
+        setQ2FYC(quarterlyFYCFormatted);
+        setQ3FYC(quarterlyFYCFormatted);
+        setQ4FYC(quarterlyFYCFormatted);
+        lastAutoPopulatedMonthlyFYC.current = monthlyFYCValue;
+      }
+    } else if (isLeader || !monthlyGoalFYC || monthlyGoalFYC.trim() === '') {
+      lastAutoPopulatedMonthlyFYC.current = null;
+    }
+  }, [monthlyGoalFYC, isLeader]); // Only depend on monthlyGoalFYC and isLeader to avoid loops
 
   const updateMonthlyGoal = () => {
     const type = monthlyGoalTarget;
@@ -1452,8 +1473,8 @@ export function GoalSettingTab({ userState, originalUserRole, onShowAI, simulati
                       const fyp = newFYC / 0.25;
                       setMonthlyGoalFYP(formatNumberWithCommas(Math.round(fyp).toString()));
                       
-                      // Sync quarterly goals for advisors only: quarterly = monthly * 3
-                      if (!isLeader) {
+                      // Auto-populate quarterly goals for advisors: quarterly = monthly * 3
+                      if (!isLeader && newFYC > 0) {
                         const quarterlyFYC = Math.round(newFYC * 3);
                         const quarterlyFYCFormatted = formatNumberWithCommas(quarterlyFYC.toString());
                         setQ1FYC(quarterlyFYCFormatted);
@@ -1489,8 +1510,8 @@ export function GoalSettingTab({ userState, originalUserRole, onShowAI, simulati
                       const fyc = newFYP * 0.25;
                       setMonthlyGoalFYC(formatNumberWithCommas(Math.round(fyc).toString()));
                       
-                      // Sync quarterly goals for advisors only: quarterly = monthly * 3
-                      if (!isLeader) {
+                      // Auto-populate quarterly goals for advisors: quarterly = monthly * 3
+                      if (!isLeader && fyc > 0) {
                         const quarterlyFYC = Math.round(fyc * 3);
                         const quarterlyFYCFormatted = formatNumberWithCommas(quarterlyFYC.toString());
                         setQ1FYC(quarterlyFYCFormatted);
