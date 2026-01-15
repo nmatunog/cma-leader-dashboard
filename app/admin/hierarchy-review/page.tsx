@@ -730,12 +730,45 @@ export default function HierarchyReviewPage() {
                         ]
                       })
                     });
-                    const result = await response.json();
+                    
+                    // Get response text first (can only read response body once)
+                    const responseText = await response.text();
+                    
+                    // Check if response is ok
+                    if (!response.ok) {
+                      const errorMsg = responseText || `HTTP ${response.status} ${response.statusText}`;
+                      throw new Error(`API error: ${errorMsg}`);
+                    }
+                    
+                    // Check if response is empty
+                    if (!responseText || responseText.trim() === '' || responseText.trim() === '{}') {
+                      console.error('Empty response from API. Response status:', response.status, 'Response headers:', Object.fromEntries(response.headers.entries()));
+                      throw new Error('Received empty response from server. The API may not be properly configured or the server encountered an error. Check server logs.');
+                    }
+                    
+                    // Parse JSON response
+                    let result;
+                    try {
+                      result = JSON.parse(responseText);
+                    } catch (e) {
+                      console.error('Failed to parse JSON response. Response text:', responseText);
+                      throw new Error(`Invalid JSON response from server: ${responseText.substring(0, 200)}`);
+                    }
+                    
+                    // Check if result is empty or malformed
+                    if (!result || typeof result !== 'object' || Object.keys(result).length === 0) {
+                      console.error('Empty or invalid response object from API. Parsed result:', result, 'Original text:', responseText);
+                      throw new Error('Received empty response object from server. The API may not be properly configured. Check server logs.');
+                    }
+                    
                     if (result.success) {
-                      alert(`Successfully updated ${result.summary.successful} hierarchy placements.`);
+                      alert(`Successfully updated ${result.summary?.successful || 0} hierarchy placements.`);
                       await loadData();
                     } else {
-                      alert(`Failed to update some placements. ${result.summary.failed} failed, ${result.summary.successful} succeeded. Check console for details.`);
+                      const failed = result.summary?.failed || 0;
+                      const successful = result.summary?.successful || 0;
+                      const errorMsg = result.error || 'Unknown error';
+                      alert(`Failed to update some placements. ${failed} failed, ${successful} succeeded.\n\nError: ${errorMsg}\n\nCheck console for details.`);
                       console.error('Update results:', result);
                     }
                   } catch (err) {

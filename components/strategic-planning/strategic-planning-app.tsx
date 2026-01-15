@@ -35,14 +35,12 @@ export function StrategicPlanningApp({ initialTab, initialView }: StrategicPlann
   const [showAIModal, setShowAIModal] = useState(false);
   const [aiModalContent, setAIModalContent] = useState('');
   const [aiModalTitle, setAIModalTitle] = useState('AI Assistant');
-  const [isAILoading, setIsAILoading] = useState(false);
   const [simulationData, setSimulationData] = useState<{
     personalFYC?: number;
     tenuredCount?: number;
     tenuredProd?: number;
     newCount?: number;
     newProd?: number;
-    activeRecruits?: number; // Add activeRecruits for Self Override calculation
     // Advisor simulation data
     fyc?: number;
     cases?: number;
@@ -60,8 +58,8 @@ export function StrategicPlanningApp({ initialTab, initialView }: StrategicPlann
 
       // Set user state from authenticated user
       // Handle initial view from URL params (for redirects from old Targets pages)
-      let initialRole: 'advisor' | 'leader' = (user.role === 'admin' || user.role === 'superuser') ? 'advisor' : user.role;
-      if (initialView === 'leader' && (user.role === 'admin' || user.role === 'superuser' || user.role === 'leader')) {
+      let initialRole: 'advisor' | 'leader' = user.role === 'admin' ? 'advisor' : user.role;
+      if (initialView === 'leader' && (user.role === 'admin' || user.role === 'leader')) {
         initialRole = 'leader';
       } else if (initialView === 'advisor') {
         initialRole = 'advisor';
@@ -115,7 +113,6 @@ export function StrategicPlanningApp({ initialTab, initialView }: StrategicPlann
     setAIModalContent(content);
     setShowAIModal(true);
   };
-
 
   // Show loading state while checking auth
   if (loading) {
@@ -242,25 +239,18 @@ export function StrategicPlanningApp({ initialTab, initialView }: StrategicPlann
         {activeTab === 'advisor' && (
           <AdvisorSimTab 
             onPushToGoals={(data) => {
-              console.log('onPushToGoals called with data (advisor):', data);
               setSimulationData(data);
-              // Use setTimeout to ensure state updates are processed
-              setTimeout(() => {
-                setActiveTab('goals');
-              }, 0);
+              setActiveTab('goals');
             }}
           />
         )}
         {activeTab === 'leader' && (
           <LeaderHQTab 
             userState={userState} 
+            onGenerateRecruitmentAd={() => showAI('Recruitment Ad', 'Recruitment ad generated (mock)')}
             onPushToGoals={(data) => {
-              console.log('onPushToGoals called with data (leader):', data);
               setSimulationData(data);
-              // Use setTimeout to ensure state updates are processed
-              setTimeout(() => {
-                setActiveTab('goals');
-              }, 0);
+              setActiveTab('goals');
             }}
           />
         )}
@@ -281,8 +271,6 @@ export function StrategicPlanningApp({ initialTab, initialView }: StrategicPlann
         onClose={() => setShowAIModal(false)}
         title={aiModalTitle}
         content={aiModalContent}
-        showDownloadButton={false}
-        onDownloadPDF={undefined}
       />
     </>
   );

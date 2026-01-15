@@ -555,11 +555,11 @@ export async function getSUMsInAgencyFromUsers(agencyName: string): Promise<User
     const canonicalAgencyName = getCanonicalAgencyName(agencyName);
     
     // Get all users with rank SUM in this agency
+    // Note: Removed orderBy to avoid requiring composite index - will sort in memory
     const q = query(
       collection(db, USERS_COLLECTION),
       where('rank', '==', 'SUM'),
-      where('isActive', '==', true),
-      orderBy('name', 'asc')
+      where('isActive', '==', true)
     );
     
     const querySnapshot = await getDocs(q);
@@ -579,7 +579,8 @@ export async function getSUMsInAgencyFromUsers(agencyName: string): Promise<User
       }
     });
     
-    return sums;
+    // Sort in memory to avoid requiring composite index
+    return sums.sort((a, b) => a.name.localeCompare(b.name));
   } catch (error) {
     console.error('Error getting SUMs in agency from Users:', error);
     return [];
@@ -601,11 +602,11 @@ export async function getUMsUnderSUMFromUsers(sumName: string, agencyName: strin
     const canonicalSumName = getCanonicalName(sumName);
     
     // Get all users with rank UM in this agency
+    // Note: Removed orderBy to avoid requiring composite index - will sort in memory
     const q = query(
       collection(db, USERS_COLLECTION),
       where('rank', '==', 'UM'),
-      where('isActive', '==', true),
-      orderBy('name', 'asc')
+      where('isActive', '==', true)
     );
     
     const querySnapshot = await getDocs(q);
@@ -652,11 +653,11 @@ export async function getUMsUnderADDFromUsers(addName: string, agencyName: strin
     const canonicalAddName = getCanonicalName(addName);
     
     // Get all users with rank UM in this agency
+    // Note: Removed orderBy to avoid requiring composite index - will sort in memory
     const q = query(
       collection(db, USERS_COLLECTION),
       where('rank', '==', 'UM'),
-      where('isActive', '==', true),
-      orderBy('name', 'asc')
+      where('isActive', '==', true)
     );
     
     const querySnapshot = await getDocs(q);
@@ -702,11 +703,11 @@ export async function getUnitsByAgencyFromUsers(agencyName: string): Promise<str
     const canonicalAgencyName = getCanonicalAgencyName(agencyName);
     
     // Get all users with rank UM in this agency
+    // Note: Removed orderBy to avoid requiring composite index - will sort in memory
     const q = query(
       collection(db, USERS_COLLECTION),
       where('rank', '==', 'UM'),
-      where('isActive', '==', true),
-      orderBy('name', 'asc')
+      where('isActive', '==', true)
     );
     
     const querySnapshot = await getDocs(q);
@@ -727,6 +728,7 @@ export async function getUnitsByAgencyFromUsers(agencyName: string): Promise<str
     });
     
     // Also include SUMs and ADDs as units (they manage their own units)
+    // Note: This query only has one where clause, so orderBy is fine
     const leadersQ = query(
       collection(db, USERS_COLLECTION),
       where('isActive', '==', true),

@@ -1,15 +1,17 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { Sidebar } from '@/components/sidebar';
 import { getAllGoals, getAgencyGoals, getGoalsForSUM, getGoalsForADD, getUnitGoals, type StrategicPlanningGoal } from '@/services/strategic-planning-service';
 import { formatNumberWithCommas } from '@/components/strategic-planning/utils/number-format';
 import { getCanonicalAgencyName, areAgencyNamesEqual } from '@/lib/utils/agency-name-normalizer';
 import { formatDisplayName } from '@/lib/utils/name-formatter';
-import { getCanonicalName } from '@/lib/utils/name-canonicalizer';
+import { getCanonicalName, areNamesLikelySamePerson } from '@/lib/utils/name-canonicalizer';
 import { getAllUsers, getSUMsInAgencyFromUsers, getUMsUnderSUMFromUsers, getUMsUnderADDFromUsers, getUnitsByAgencyFromUsers } from '@/lib/user-service';
+import type { User } from '@/types/user';
 import { useAuth } from '@/contexts/auth-context';
+import { generateStrategicPlanningPDF, generateUnitSummaryPDF, generateSUMSummaryPDF, generateAgencySummaryPDF } from '@/components/strategic-planning/utils/pdf-generator';
 
 interface QuarterlyData {
   baseManpower: number;
@@ -57,6 +59,18 @@ interface AggregatedData {
     fyp: number;
     fyc: number;
     income: number;
+    // Reconciliation breakdown
+    leaderPersonalFYP?: number;
+    leaderPersonalFYC?: number;
+    leaderPersonalCases?: number;
+    leaderPersonalRecruits?: number;
+    leaderTeamFYP?: number; // Annual team FYP (monthly * 12)
+    leaderTeamFYC?: number; // Annual team FYC (monthly * 12)
+    advisorSumFYP?: number;
+    advisorSumFYC?: number;
+    advisorSumCases?: number;
+    advisorSumRecruits?: number;
+    reconciliationMethod?: 'leader_team' | 'advisor_sum'; // Which method was used: max(Leader Team, Advisor Sum)
   }>;
   byRank: Record<string, {
     count: number;
@@ -92,12 +106,17 @@ export default function ReportsPage() {
   const [sumToUMsMap, setSumToUMsMap] = useState<Map<string, string[]>>(new Map()); // Cache: SUM name -> list of UM names
   const [addToUMsMap, setAddToUMsMap] = useState<Map<string, string[]>>(new Map()); // Cache: ADD name -> list of UM names (direct reporting)
   const [userRankMap, setUserRankMap] = useState<Map<string, string>>(new Map()); // Cache: userName -> rank (from user records, source of truth)
+  const [userAgencyMap, setUserAgencyMap] = useState<Map<string, string>>(new Map()); // Cache: userName -> agencyName (from user records, source of truth)
+  const [userUnitManagerMap, setUserUnitManagerMap] = useState<Map<string, string>>(new Map()); // Cache: userName -> unitManager (from user records, source of truth)
+  const [validAgencyNames, setValidAgencyNames] = useState<Set<string>>(new Set()); // Cache: valid agency names from Users collection (source of truth)
+  const [allUsersList, setAllUsersList] = useState<User[]>([]); // Store all users for flexible name matching
   
   // State for accordion expansion
   const [expandedAgencies, setExpandedAgencies] = useState<Set<string>>(new Set()); // Track expanded agencies
   const [expandedSUMs, setExpandedSUMs] = useState<Map<string, Set<string>>>(new Map()); // Track expanded SUMs per agency
   const [expandedUnits, setExpandedUnits] = useState<Map<string, Set<string>>>(new Map()); // Track expanded units per SUM
   const [showSummaryByUnit, setShowSummaryByUnit] = useState<boolean>(false); // Track Summary by Unit section visibility
+  const [expandedUnitManagers, setExpandedUnitManagers] = useState<Set<string>>(new Set()); // Track expanded unit managers for individual reports
   
   // Helper functions for accordion state
   const toggleAgency = (agencyName: string) => {
@@ -146,7 +165,148 @@ export default function ReportsPage() {
   const isSUMExpanded = (agencyName: string, sumKey: string) => (expandedSUMs.get(agencyName) || new Set()).has(sumKey);
   const isUnitExpanded = (sumKey: string, unitKey: string) => (expandedUnits.get(sumKey) || new Set()).has(unitKey);
   
-  // Helper function to calculate summary metrics for a set of goals
+  const toggleUnitManager = (unitManagerName: string) => {
+    setExpandedUnitManagers(prev => {
+      const next = new Set(prev);
+      if (next.has(unitManagerName)) {
+        next.delete(unitManagerName);
+      } else {
+        next.add(unitManagerName);
+      }
+      return next;
+    });
+  };
+  
+  const isUnitManagerExpanded = (unitManagerName: string) => expandedUnitManagers.has(unitManagerName);
+  
+  // Helper function to calculate annual new recruits from quarterly data
+  const calculateAnnualNewRecruits = (goal: StrategicPlanningGoal): number => {
+    return (goal.q1?.newRecruits || 0) + 
+           (goal.q2?.newRecruits || 0) + 
+           (goal.q3?.newRecruits || 0) + 
+           (goal.q4?.newRecruits || 0);
+  };
+
+  // Helper function to calculate reconciled unit totals using reconciliation logic
+  // Unit Total = Leader Personal + max(Leader Team, Advisor Sum)
+  const calculateReconciledUnitTotals = (unitGoals: StrategicPlanningGoal[]) => {
+    // Separate leader goals from advisor goals
+    const leaderGoal = unitGoals.find(g => g.userRank === 'UM' || g.userRank === 'SUM' || g.userRank === 'ADD');
+    const advisorGoals = unitGoals.filter(g => g.userRank !== 'UM' && g.userRank !== 'SUM' && g.userRank !== 'ADD');
+    
+    // Calculate leader personal goals from quarterly goals
+    // NOTE: For leaders, q1.fyc contains (Personal + Team), so we need to subtract team component
+    // Team annual = monthlyTeamTarget * 12
+    let leaderPersonalFYP = 0;
+    let leaderPersonalFYC = 0;
+    
+    if (leaderGoal) {
+      // Total FYP/FYC from quarterly goals (includes both personal and team)
+      let totalFYP = (leaderGoal.q1?.fyp || 0) + (leaderGoal.q2?.fyp || 0) + (leaderGoal.q3?.fyp || 0) + (leaderGoal.q4?.fyp || 0);
+      let totalFYC = (leaderGoal.q1?.fyc || 0) + (leaderGoal.q2?.fyc || 0) + (leaderGoal.q3?.fyc || 0) + (leaderGoal.q4?.fyc || 0);
+      
+      // Annual team targets
+      const annualTeamFYP = leaderGoal.monthlyTeamTargetFYP ? (leaderGoal.monthlyTeamTargetFYP * 12) : 0;
+      const annualTeamFYC = leaderGoal.monthlyTeamTargetFYC ? (leaderGoal.monthlyTeamTargetFYC * 12) : 0;
+      
+        // Calculate Personal FYP/FYC
+        // If quarterly values exist, use them (Total - Team)
+        // If quarterly values are zero but monthly target is set, use monthly target as fallback
+        // If result is zero/negative (data inconsistency), use monthly target as fallback
+        if (totalFYP > 0) {
+          // Quarterly values exist - subtract team component
+          const calculatedPersonalFYP = totalFYP - annualTeamFYP;
+          if (calculatedPersonalFYP > 0) {
+            leaderPersonalFYP = calculatedPersonalFYP;
+          } else if (leaderGoal.monthlyTargetFYP && leaderGoal.monthlyTargetFYP > 0) {
+            // Result is zero/negative - likely data inconsistency, use monthly target as fallback
+            // Monthly target FYP is personal-only, so use it directly * 12
+            leaderPersonalFYP = leaderGoal.monthlyTargetFYP * 12;
+          } else {
+            leaderPersonalFYP = 0;
+          }
+        } else if (leaderGoal.monthlyTargetFYP && leaderGoal.monthlyTargetFYP > 0) {
+          // Fallback: Use monthly target FYP * 12 (annual) as personal FYP (monthly target is personal-only)
+          leaderPersonalFYP = leaderGoal.monthlyTargetFYP * 12;
+        } else {
+          leaderPersonalFYP = 0;
+        }
+        
+        if (totalFYC > 0) {
+          // Quarterly values exist - subtract team component
+          const calculatedPersonalFYC = totalFYC - annualTeamFYC;
+          if (calculatedPersonalFYC > 0) {
+            leaderPersonalFYC = calculatedPersonalFYC;
+          } else if (leaderGoal.monthlyTargetFYC && leaderGoal.monthlyTargetFYC > 0) {
+            // Result is zero/negative - likely data inconsistency, use monthly target as fallback
+            // Monthly target FYC is personal-only, so use it directly * 12
+            leaderPersonalFYC = leaderGoal.monthlyTargetFYC * 12;
+          } else {
+            leaderPersonalFYC = 0;
+          }
+        } else if (leaderGoal.monthlyTargetFYC && leaderGoal.monthlyTargetFYC > 0) {
+          // Fallback: Use monthly target FYC * 12 (annual) as personal FYC (monthly target is personal-only)
+          leaderPersonalFYC = leaderGoal.monthlyTargetFYC * 12;
+        } else {
+          leaderPersonalFYC = 0;
+        }
+    }
+    const leaderPersonalCases = leaderGoal ? 
+      ((leaderGoal.q1?.cases || 0) + (leaderGoal.q2?.cases || 0) + (leaderGoal.q3?.cases || 0) + (leaderGoal.q4?.cases || 0)) : 0;
+    const leaderPersonalRecruits = leaderGoal ? calculateAnnualNewRecruits(leaderGoal) : 0;
+    
+    // Calculate leader team goals (annual from monthly targets)
+    const leaderTeamFYP = leaderGoal?.monthlyTeamTargetFYP ? (leaderGoal.monthlyTeamTargetFYP * 12) : 0;
+    const leaderTeamFYC = leaderGoal?.monthlyTeamTargetFYC ? (leaderGoal.monthlyTeamTargetFYC * 12) : 0;
+    
+    // Calculate advisor sum totals from quarterly goals (advisors only have personal goals)
+    const advisorSum = advisorGoals.reduce((acc, goal) => {
+      const annualNewRecruits = calculateAnnualNewRecruits(goal);
+      const annualCases = (goal.q1?.cases || 0) + (goal.q2?.cases || 0) + (goal.q3?.cases || 0) + (goal.q4?.cases || 0);
+      // Calculate FYP/FYC from quarterly goals (sum of q1+q2+q3+q4) - this is the advisor's personal FYP/FYC
+      const advisorFYP = (goal.q1?.fyp || 0) + (goal.q2?.fyp || 0) + (goal.q3?.fyp || 0) + (goal.q4?.fyp || 0);
+      const advisorFYC = (goal.q1?.fyc || 0) + (goal.q2?.fyc || 0) + (goal.q3?.fyc || 0) + (goal.q4?.fyc || 0);
+      return {
+        fyp: acc.fyp + advisorFYP,
+        fyc: acc.fyc + advisorFYC,
+        cases: acc.cases + annualCases,
+        recruits: acc.recruits + annualNewRecruits,
+      };
+    }, { fyp: 0, fyc: 0, cases: 0, recruits: 0 });
+    
+    // Reconciliation Logic: Unit Total = Leader Personal + max(Leader Team, Advisor Sum)
+    const teamOrAdvisorFYP = Math.max(leaderTeamFYP, advisorSum.fyp);
+    const teamOrAdvisorFYC = Math.max(leaderTeamFYC, advisorSum.fyc);
+    
+    const reconciledFYP = leaderPersonalFYP + teamOrAdvisorFYP;
+    const reconciledFYC = leaderPersonalFYC + teamOrAdvisorFYC;
+    
+    // For cases and recruits, use Leader Personal + Advisor Sum (no team targets)
+    const reconciledCases = leaderPersonalCases + advisorSum.cases;
+    const reconciledRecruits = leaderPersonalRecruits + advisorSum.recruits;
+    
+    // Calculate other totals (manpower, income) - sum all goals
+    const totalManpower = unitGoals.reduce((sum, goal) => sum + (goal.annualManpower || 0), 0);
+    const totalIncome = unitGoals.reduce((sum, goal) => sum + (goal.annualIncome || 0), 0);
+    
+    return {
+      fyp: reconciledFYP,
+      fyc: reconciledFYC,
+      cases: reconciledCases,
+      recruits: reconciledRecruits,
+      manpower: totalManpower,
+      income: totalIncome,
+      // Breakdown for reference
+      leaderPersonalFYP,
+      leaderPersonalFYC,
+      leaderTeamFYP,
+      leaderTeamFYC,
+      advisorSumFYP: advisorSum.fyp,
+      advisorSumFYC: advisorSum.fyc,
+    };
+  };
+
+  // Helper function to calculate summary metrics for a set of goals (deprecated - use calculateReconciledUnitTotals instead)
   const calculateUnitMetrics = (goals: StrategicPlanningGoal[]) => {
     const annualNewRecruits = goals.reduce((sum, goal) => {
       return sum + (goal.q1?.newRecruits || 0) + (goal.q2?.newRecruits || 0) + 
@@ -220,19 +380,87 @@ export default function ReportsPage() {
     }
   }, [user, authLoading, router]);
   
-  // Load user ranks from user records (source of truth, not from goals)
+  // Load user ranks and agency names from user records (source of truth, not from goals)
   const loadUserRanks = async () => {
     try {
       const allUsers = await getAllUsers();
       const rankMap = new Map<string, string>();
+      const agencyMap = new Map<string, string>(); // userName -> canonical agencyName
+      const unitManagerMap = new Map<string, string>(); // userName -> unitManager (source of truth)
+      const agencySet = new Set<string>();
+      
       allUsers.forEach(user => {
         if (user.name && user.rank) {
+          // Store both canonical and original name for rank lookup
+          const canonicalName = getCanonicalName(user.name);
+          rankMap.set(canonicalName, user.rank);
+          // Also store original name for backward compatibility
           rankMap.set(user.name, user.rank);
         }
+        // Map userName to canonical agency name (source of truth for agency assignment)
+        // Store both canonical and original name variations
+        if (user.name) {
+          const canonicalUserName = getCanonicalName(user.name);
+          if (user.agencyName) {
+            const canonicalAgencyName = getCanonicalAgencyName(user.agencyName);
+            // Store with canonical name (primary lookup)
+            agencyMap.set(canonicalUserName, canonicalAgencyName);
+            // Also store with original name for backward compatibility
+            agencyMap.set(user.name, canonicalAgencyName);
+            agencySet.add(canonicalAgencyName);
+          } else {
+            // Even if no agencyName, store the user so we know they exist
+            // This helps with debugging - we'll know the user exists but has no agency
+            console.warn(`[ReportsPage] User "${user.name}" (canonical: "${canonicalUserName}") has no agencyName in Users collection`);
+          }
+          
+          // Map userName to unitManager (source of truth for unit assignments)
+          if (user.unitManager) {
+            const canonicalUnitManager = getCanonicalName(user.unitManager);
+            // Store with canonical name (primary lookup)
+            unitManagerMap.set(canonicalUserName, canonicalUnitManager);
+            // Also store with original name for backward compatibility
+            unitManagerMap.set(user.name, canonicalUnitManager);
+          }
+        }
       });
+      
+      // Store allUsers for flexible name matching when needed
+      setAllUsersList(allUsers);
+      
       setUserRankMap(rankMap);
+      setUserAgencyMap(agencyMap);
+      setUserUnitManagerMap(unitManagerMap);
+      setValidAgencyNames(agencySet);
+      
       const sumNames = Array.from(rankMap.entries()).filter(([_, rank]) => rank === 'SUM').map(([name]) => name);
       console.log('[ReportsPage] Loaded user ranks. SUMs found:', sumNames);
+      console.log('[ReportsPage] Valid agency names from Users:', Array.from(agencySet).sort());
+      console.log('[ReportsPage] User agency map size:', agencyMap.size);
+      
+      // Debug: Log some sample entries to verify the map is correct
+      const sampleEntries = Array.from(agencyMap.entries()).slice(0, 5);
+      console.log('[ReportsPage] Sample user agency map entries:', sampleEntries);
+      
+      // Debug: Check for specific users mentioned in the issue
+      const checkUsers = ['JANICE I. NUNEZ', 'MARIA ESTRELLA C. MATUNOG', 'VIRGINIA B. IWAY', 'SARAH P. RECLA', 'DARLYN L. PEREZ'];
+      checkUsers.forEach(name => {
+        const canonicalName = getCanonicalName(name);
+        const agency = agencyMap.get(canonicalName);
+        // Also check if they exist in allUsers
+        const userInCollection = allUsers.find(u => getCanonicalName(u.name) === canonicalName);
+        if (userInCollection) {
+          console.log(`[ReportsPage] User "${name}" (canonical: "${canonicalName}") -> Found in Users collection. Agency in collection: "${userInCollection.agencyName || 'MISSING'}", Mapped agency: ${agency || 'NOT FOUND'}`);
+        } else {
+          console.warn(`[ReportsPage] User "${name}" (canonical: "${canonicalName}") -> NOT FOUND in Users collection at all!`);
+        }
+      });
+      
+      // Debug: Show all unit managers/leaders in the Users collection
+      const leadersInCollection = allUsers.filter(u => u.rank === 'UM' || u.rank === 'SUM' || u.rank === 'ADD');
+      console.log(`[ReportsPage] Total leaders (UM/SUM/ADD) in Users collection: ${leadersInCollection.length}`);
+      const leaderNames = leadersInCollection.map(u => `${u.name} (${u.rank}) - Agency: ${u.agencyName || 'MISSING'}`);
+      console.log('[ReportsPage] Leaders in Users collection:', leaderNames.slice(0, 10)); // Show first 10
     } catch (err) {
       console.error('Error loading user ranks:', err);
     }
@@ -376,10 +604,11 @@ export default function ReportsPage() {
   }, [goals, userRankMap]);
 
   useEffect(() => {
-    if (goals.length > 0 && userRankMap.size > 0) {
+    // Wait for both userRankMap and userAgencyMap to be loaded before calculating aggregates
+    if (goals.length > 0 && userRankMap.size > 0 && userAgencyMap.size > 0) {
       calculateAggregates();
     }
-  }, [goals, filterAgency, filterRank, filterUnit, filterSUM, sumToUMsMap, userRankMap]);
+  }, [goals, filterAgency, filterRank, filterUnit, filterSUM, sumToUMsMap, userRankMap, userAgencyMap]);
 
   // Update available units when SUM filter changes
   useEffect(() => {
@@ -516,8 +745,18 @@ export default function ReportsPage() {
     }
   };
 
+  // Filter goals to only include those with valid agency names from Users collection
+  // This must be defined before calculateAggregates uses it
+  const validGoals = goals.filter(goal => {
+    if (!goal.agencyName || validAgencyNames.size === 0) return false;
+    const canonicalAgencyName = getCanonicalAgencyName(goal.agencyName);
+    // Only include goals if their agency name (canonicalized) exists in Users collection
+    return validAgencyNames.has(canonicalAgencyName);
+  });
+
   const calculateAggregates = async () => {
-    const filtered = goals.filter(goal => {
+    // First filter by valid agency names, then apply other filters
+    const validFiltered = validGoals.filter(goal => {
       if (filterAgency !== 'all' && goal.agencyName !== filterAgency) return false;
       if (filterRank !== 'all' && goal.userRank !== filterRank) return false;
       if (filterSUM !== 'all') {
@@ -560,6 +799,7 @@ export default function ReportsPage() {
       }
       return true;
     });
+    const filtered = validFiltered;
 
     const agg: AggregatedData = {
       totalUsers: filtered.length,
@@ -581,14 +821,195 @@ export default function ReportsPage() {
       },
     };
 
-    // STEP 1: Group goals by unit first (unit-level consolidation)
+    // STEP 1: Group goals by unit, ensuring leaders are grouped with their advisors
+    // Always use canonical names to avoid duplicates from name variations
+    // Key: canonicalManager_canonicalAgency (always use this format, ignore goal.unitName)
+    // IMPORTANT: Use Users collection as source of truth for agency assignments, not goal.agencyName
     const unitGroups: Record<string, StrategicPlanningGoal[]> = {};
+    const canonicalUnitKeyToUnitName = new Map<string, string>();
+    
+      // STEP 1A: First pass - identify all leaders (UM/SUM/ADD) and create unit groups for them
+      // Leaders always create their own unit group under their own name
+      // Check for similar names to avoid duplicate groups (e.g., "JESSICA BACULAN" vs "JESSICA G. BACULAN")
+      filtered.forEach(goal => {
+        const isLeader = goal.userRank === 'UM' || goal.userRank === 'SUM' || goal.userRank === 'ADD';
+        
+        if (isLeader) {
+          const canonicalManager = getCanonicalName(goal.userName);
+          
+          // FIRST: Check if there's already a unit group for a similar name (regardless of agency)
+          // This prevents duplicates when the same person has goals with different agency names
+          let existingUnitKey: string | null = null;
+          let goalOwnerAgency: string | null = null;
+          
+          for (const [unitKey, unitGoalList] of Object.entries(unitGroups)) {
+            // Check if any leader in this unit has a similar name
+            const similarLeader = unitGoalList.find(g => {
+              const isUnitLeader = g.userRank === 'UM' || g.userRank === 'SUM' || g.userRank === 'ADD';
+              if (!isUnitLeader) return false;
+              // Use flexible name matching to handle middle initial variations
+              return areNamesLikelySamePerson(g.userName, goal.userName);
+            });
+            
+            if (similarLeader) {
+              // Found a similar leader - verify they're actually the same person
+              // Double-check using areNamesLikelySamePerson to ensure ALL first names match
+              // This prevents "Maria Rosario" from being grouped with "Maria Estrella"
+              if (areNamesLikelySamePerson(similarLeader.userName, goal.userName)) {
+                // Confirmed same person - use their unit key and agency (from Users collection)
+                existingUnitKey = unitKey;
+                // Extract agency from existing unit key (source of truth)
+                goalOwnerAgency = unitKey.split('_').slice(1).join('_');
+                break;
+              }
+              // If names don't match (e.g., "Maria Rosario" vs "Maria Estrella"), continue searching
+            }
+          }
+          
+          // If no existing unit found, get agency from Users collection (source of truth)
+          if (!existingUnitKey) {
+            const canonicalGoalOwner = getCanonicalName(goal.userName);
+            goalOwnerAgency = userAgencyMap.get(canonicalGoalOwner) || null;
+            if (!goalOwnerAgency) {
+              // Try with original userName (not canonicalized)
+              goalOwnerAgency = userAgencyMap.get(goal.userName) || null;
+            }
+            if (!goalOwnerAgency) {
+              // Try flexible name matching
+              const matchingUser = allUsersList.find(u => 
+                areNamesLikelySamePerson(u.name, goal.userName)
+              );
+              if (matchingUser && matchingUser.agencyName) {
+                goalOwnerAgency = getCanonicalAgencyName(matchingUser.agencyName);
+                // Cache this match
+                userAgencyMap.set(canonicalGoalOwner, goalOwnerAgency);
+                userAgencyMap.set(goal.userName, goalOwnerAgency);
+              } else {
+                // Fallback to goal's agencyName
+                goalOwnerAgency = getCanonicalAgencyName(goal.agencyName);
+                console.warn(`[ReportsPage] Agency not found in Users collection for leader ${canonicalGoalOwner}, using fallback: ${goalOwnerAgency}`);
+              }
+            }
+          }
+          
+          // Create canonical unit key with the agency (either from existing unit or looked up)
+          const canonicalUnitKey = `${canonicalManager}_${goalOwnerAgency}`;
+          
+          if (existingUnitKey) {
+            // Add to existing unit group (consolidate similar names)
+            // Always use the existing unit key to ensure consistency
+            unitGroups[existingUnitKey].push(goal);
+          } else {
+            // Create new unit group for this leader
+            if (!unitGroups[canonicalUnitKey]) {
+              unitGroups[canonicalUnitKey] = [];
+              canonicalUnitKeyToUnitName.set(canonicalUnitKey, goal.unitName || canonicalUnitKey);
+            }
+            unitGroups[canonicalUnitKey].push(goal);
+          }
+        }
+      });
+    
+    // STEP 1B: Second pass - assign advisors to their unit manager's group
+    // For advisors, find which leader (UM) they report to and group them with that leader
     filtered.forEach(goal => {
-      const goalUnitName = goal.unitName || `${goal.unitManager}_${goal.agencyName}`;
-      if (!unitGroups[goalUnitName]) {
-        unitGroups[goalUnitName] = [];
+      const isLeader = goal.userRank === 'UM' || goal.userRank === 'SUM' || goal.userRank === 'ADD';
+      
+      if (!isLeader) {
+        // For advisors, get unit manager from Users collection (source of truth)
+        // Override goal.unitManager with the current assignment from Users collection
+        const canonicalGoalOwner = getCanonicalName(goal.userName);
+        let advisorUnitManager: string = userUnitManagerMap.get(canonicalGoalOwner) || '';
+        if (!advisorUnitManager) {
+          // Try with original userName (not canonicalized)
+          advisorUnitManager = userUnitManagerMap.get(goal.userName) || '';
+        }
+        if (!advisorUnitManager) {
+          // Try flexible name matching
+          const matchingUser = allUsersList.find(u => 
+            areNamesLikelySamePerson(u.name, goal.userName)
+          );
+          if (matchingUser && matchingUser.unitManager) {
+            advisorUnitManager = getCanonicalName(matchingUser.unitManager);
+            // Cache this match
+            userUnitManagerMap.set(canonicalGoalOwner, advisorUnitManager);
+            userUnitManagerMap.set(goal.userName, advisorUnitManager);
+          } else {
+            // Fallback to goal's unitManager (for backward compatibility)
+            advisorUnitManager = goal.unitManager || 'Unknown';
+            console.warn(`[ReportsPage] Unit manager not found in Users collection for advisor ${goal.userName}, using goal's unitManager: ${advisorUnitManager}`);
+          }
+        }
+        const canonicalUnitManager = getCanonicalName(advisorUnitManager);
+        
+        // Try to find a unit group for this unit manager
+        // Look through all existing unit groups to find one where the leader matches
+        let foundUnitKey: string | null = null;
+        
+        for (const [unitKey, unitGoalList] of Object.entries(unitGroups)) {
+          // Check if any leader in this unit matches the advisor's unitManager
+          // Use areNamesLikelySamePerson to handle middle initial variations (e.g., "JESSICA BACULAN" vs "JESSICA G. BACULAN")
+          const leaderInUnit = unitGoalList.find(g => {
+            const isUnitLeader = g.userRank === 'UM' || g.userRank === 'SUM' || g.userRank === 'ADD';
+            if (!isUnitLeader) return false;
+            // Use flexible name matching to handle middle initial variations
+            return areNamesLikelySamePerson(g.userName, advisorUnitManager);
+          });
+          
+          if (leaderInUnit) {
+            foundUnitKey = unitKey;
+            break;
+          }
+        }
+        
+        // If we found a matching unit, add the advisor to it
+        if (foundUnitKey) {
+          unitGroups[foundUnitKey].push(goal);
+        } else {
+          // If no matching unit found, create a new unit group for this advisor
+          // This handles cases where the unit manager hasn't submitted a goal yet
+          // Get agency from Users collection
+          // Try exact match first, then flexible name matching
+          let canonicalAgency: string;
+          let unitManagerAgency = userAgencyMap.get(canonicalUnitManager);
+          if (!unitManagerAgency) {
+            // Try with original unitManager name (not canonicalized)
+            unitManagerAgency = userAgencyMap.get(advisorUnitManager);
+          }
+          if (!unitManagerAgency) {
+            // Try flexible name matching - look through all users to find a similar name
+            const matchingUser = allUsersList.find(u => 
+              areNamesLikelySamePerson(u.name, advisorUnitManager)
+            );
+            if (matchingUser && matchingUser.agencyName) {
+              unitManagerAgency = getCanonicalAgencyName(matchingUser.agencyName);
+              // Cache this match for future lookups
+              userAgencyMap.set(canonicalUnitManager, unitManagerAgency);
+              userAgencyMap.set(advisorUnitManager, unitManagerAgency);
+            }
+          }
+          if (unitManagerAgency) {
+            canonicalAgency = unitManagerAgency;
+          } else {
+            // Fallback: Try advisor's own agency, then goal's agencyName
+            const canonicalGoalOwner = getCanonicalName(goal.userName);
+            let goalOwnerAgency = userAgencyMap.get(canonicalGoalOwner);
+            if (!goalOwnerAgency) {
+              goalOwnerAgency = userAgencyMap.get(goal.userName);
+            }
+            canonicalAgency = goalOwnerAgency || getCanonicalAgencyName(goal.agencyName);
+            console.warn(`[ReportsPage] Unit manager "${canonicalUnitManager}" not found in Users collection for advisor ${goal.userName}, using fallback agency: ${canonicalAgency}`);
+          }
+          
+          const canonicalUnitKey = `${canonicalUnitManager}_${canonicalAgency}`;
+          
+          if (!unitGroups[canonicalUnitKey]) {
+            unitGroups[canonicalUnitKey] = [];
+            canonicalUnitKeyToUnitName.set(canonicalUnitKey, goal.unitName || canonicalUnitKey);
+          }
+          unitGroups[canonicalUnitKey].push(goal);
+        }
       }
-      unitGroups[goalUnitName].push(goal);
     });
 
     // Helper function to calculate annual new recruits from quarterly data
@@ -599,15 +1020,131 @@ export default function ReportsPage() {
              (goal.q4?.newRecruits || 0);
     };
 
-    // STEP 2: Calculate unit totals (consolidate goals within each unit)
-    Object.entries(unitGroups).forEach(([unitName, unitGoals]) => {
+    // STEP 2: Calculate unit totals with reconciliation logic
+    // Reconcile leader personal goals with advisor goals
+    // unitName here is actually the canonical unit key (canonicalManager_canonicalAgency)
+    Object.entries(unitGroups).forEach(([canonicalUnitKey, unitGoals]) => {
+      // Separate leader goals from advisor goals
+      const leaderGoal = unitGoals.find(g => g.userRank === 'UM' || g.userRank === 'SUM' || g.userRank === 'ADD');
+      const advisorGoals = unitGoals.filter(g => g.userRank !== 'UM' && g.userRank !== 'SUM' && g.userRank !== 'ADD');
+      
+      // Calculate leader personal goals from quarterly goals
+      // NOTE: For leaders, q1.fyc contains (Personal + Team), so we need to subtract team component
+      // Team annual = monthlyTeamTarget * 12
+      let leaderPersonalFYP = 0;
+      let leaderPersonalFYC = 0;
+      
+      if (leaderGoal) {
+        // Total FYP/FYC from quarterly goals (includes both personal and team)
+        let totalFYP = (leaderGoal.q1?.fyp || 0) + (leaderGoal.q2?.fyp || 0) + (leaderGoal.q3?.fyp || 0) + (leaderGoal.q4?.fyp || 0);
+        let totalFYC = (leaderGoal.q1?.fyc || 0) + (leaderGoal.q2?.fyc || 0) + (leaderGoal.q3?.fyc || 0) + (leaderGoal.q4?.fyc || 0);
+        
+        // Annual team targets
+        const annualTeamFYP = leaderGoal.monthlyTeamTargetFYP ? (leaderGoal.monthlyTeamTargetFYP * 12) : 0;
+        const annualTeamFYC = leaderGoal.monthlyTeamTargetFYC ? (leaderGoal.monthlyTeamTargetFYC * 12) : 0;
+        
+        // Calculate Personal FYP/FYC
+        // If quarterly values exist, use them (Total - Team)
+        // If quarterly values are zero but monthly target is set, use monthly target as fallback
+        // If result is zero/negative (data inconsistency), use monthly target as fallback
+        if (totalFYP > 0) {
+          // Quarterly values exist - subtract team component
+          const calculatedPersonalFYP = totalFYP - annualTeamFYP;
+          if (calculatedPersonalFYP > 0) {
+            leaderPersonalFYP = calculatedPersonalFYP;
+          } else if (leaderGoal.monthlyTargetFYP && leaderGoal.monthlyTargetFYP > 0) {
+            // Result is zero/negative - likely data inconsistency, use monthly target as fallback
+            // Monthly target FYP is personal-only, so use it directly * 12
+            leaderPersonalFYP = leaderGoal.monthlyTargetFYP * 12;
+          } else {
+            leaderPersonalFYP = 0;
+          }
+        } else if (leaderGoal.monthlyTargetFYP && leaderGoal.monthlyTargetFYP > 0) {
+          // Fallback: Use monthly target FYP * 12 (annual) as personal FYP (monthly target is personal-only)
+          leaderPersonalFYP = leaderGoal.monthlyTargetFYP * 12;
+        } else {
+          leaderPersonalFYP = 0;
+        }
+        
+        if (totalFYC > 0) {
+          // Quarterly values exist - subtract team component
+          const calculatedPersonalFYC = totalFYC - annualTeamFYC;
+          if (calculatedPersonalFYC > 0) {
+            leaderPersonalFYC = calculatedPersonalFYC;
+          } else if (leaderGoal.monthlyTargetFYC && leaderGoal.monthlyTargetFYC > 0) {
+            // Result is zero/negative - likely data inconsistency, use monthly target as fallback
+            // Monthly target FYC is personal-only, so use it directly * 12
+            leaderPersonalFYC = leaderGoal.monthlyTargetFYC * 12;
+          } else {
+            leaderPersonalFYC = 0;
+          }
+        } else if (leaderGoal.monthlyTargetFYC && leaderGoal.monthlyTargetFYC > 0) {
+          // Fallback: Use monthly target FYC * 12 (annual) as personal FYC (monthly target is personal-only)
+          leaderPersonalFYC = leaderGoal.monthlyTargetFYC * 12;
+        } else {
+          leaderPersonalFYC = 0;
+        }
+      }
+      const leaderPersonalCases = leaderGoal ? 
+        ((leaderGoal.q1?.cases || 0) + (leaderGoal.q2?.cases || 0) + (leaderGoal.q3?.cases || 0) + (leaderGoal.q4?.cases || 0)) : 0;
+      const leaderPersonalRecruits = leaderGoal ? calculateAnnualNewRecruits(leaderGoal) : 0;
+      
+      // Calculate leader team goals (annual from monthly targets)
+      // Team goals are stored as monthly targets, so multiply by 12 to get annual
+      const leaderTeamFYP = leaderGoal?.monthlyTeamTargetFYP ? (leaderGoal.monthlyTeamTargetFYP * 12) : 0;
+      const leaderTeamFYC = leaderGoal?.monthlyTeamTargetFYC ? (leaderGoal.monthlyTeamTargetFYC * 12) : 0;
+      
+      // Calculate advisor sum totals from quarterly goals (advisors only have personal goals)
+      const advisorSum = advisorGoals.reduce((acc, goal) => {
+        const annualNewRecruits = calculateAnnualNewRecruits(goal);
+        const annualCases = (goal.q1?.cases || 0) + (goal.q2?.cases || 0) + (goal.q3?.cases || 0) + (goal.q4?.cases || 0);
+        // Calculate FYP/FYC from quarterly goals (sum of q1+q2+q3+q4) - this is the advisor's personal FYP/FYC
+        const advisorFYP = (goal.q1?.fyp || 0) + (goal.q2?.fyp || 0) + (goal.q3?.fyp || 0) + (goal.q4?.fyp || 0);
+        const advisorFYC = (goal.q1?.fyc || 0) + (goal.q2?.fyc || 0) + (goal.q3?.fyc || 0) + (goal.q4?.fyc || 0);
+        return {
+          fyp: acc.fyp + advisorFYP,
+          fyc: acc.fyc + advisorFYC,
+          cases: acc.cases + annualCases,
+          recruits: acc.recruits + annualNewRecruits,
+        };
+      }, { fyp: 0, fyc: 0, cases: 0, recruits: 0 });
+      
+      // Reconciliation Logic (clarified with examples):
+      // Unit Total = Leader Personal + max(Leader Team, Advisor Sum)
+      // Example 1: Leader Personal = 1M, Leader Team = 800K, Advisor Sum = 500K
+      //   → Unit Total = 1M + 800K = 1.8M (uses Leader Team since 800K > 500K)
+      // Example 2: Leader Personal = 500K, Leader Team = 1M, Advisor Sum = 1.3M
+      //   → Unit Total = 500K + 1.3M = 1.8M (uses Advisor Sum since 1.3M > 1M)
+      // The variance accounts for advisors not yet submitting and new recruits coming later
+      
+      let unitFYP: number;
+      let unitFYC: number;
+      let unitCases: number;
+      let unitRecruits: number;
+      let reconciliationMethod: 'leader_team' | 'advisor_sum';
+      
+      // For FYP and FYC: Unit Total = Leader Personal + max(Leader Team, Advisor Sum)
+      const teamOrAdvisorFYP = Math.max(leaderTeamFYP, advisorSum.fyp);
+      const teamOrAdvisorFYC = Math.max(leaderTeamFYC, advisorSum.fyc);
+      
+      unitFYP = leaderPersonalFYP + teamOrAdvisorFYP;
+      unitFYC = leaderPersonalFYC + teamOrAdvisorFYC;
+      
+      // For cases and recruits, use Leader Personal + Advisor Sum
+      // (no team targets for these metrics)
+      unitCases = leaderPersonalCases + advisorSum.cases;
+      unitRecruits = leaderPersonalRecruits + advisorSum.recruits;
+      
+      // Determine reconciliation method based on which is higher (Leader Team or Advisor Sum)
+      reconciliationMethod = leaderTeamFYP > advisorSum.fyp ? 'leader_team' : 'advisor_sum';
+      
+      // Calculate other totals (manpower, income) - sum all goals
       const unitTotal = unitGoals.reduce((acc, goal) => {
         const annualNewRecruits = calculateAnnualNewRecruits(goal);
         // Beginning Manpower Base: Only from leaders (UM, SUM, ADD)
         const isLeader = goal.userRank === 'UM' || goal.userRank === 'SUM' || goal.userRank === 'ADD';
         const beginningBase = isLeader ? (goal.q1?.baseManpower || 0) : 0;
         // End Manpower: Q1 Base Manpower + Total New Recruits (Q1+Q2+Q3+Q4) - only from leaders
-        // This ensures consistency: End = Beginning Base + All New Recruits Added
         const endManpower = isLeader ? ((goal.q1?.baseManpower || 0) + annualNewRecruits) : 0;
         
         return {
@@ -615,36 +1152,143 @@ export default function ReportsPage() {
           beginningManpowerBase: acc.beginningManpowerBase + beginningBase,
           endManpower: acc.endManpower + endManpower,
           manpower: acc.manpower + goal.annualManpower,
-          newRecruits: acc.newRecruits + annualNewRecruits,
-          fyp: acc.fyp + goal.annualFYP,
-          fyc: acc.fyc + goal.annualFYC,
           income: acc.income + goal.annualIncome,
         };
-      }, { count: 0, beginningManpowerBase: 0, endManpower: 0, manpower: 0, newRecruits: 0, fyp: 0, fyc: 0, income: 0 });
+      }, { count: 0, beginningManpowerBase: 0, endManpower: 0, manpower: 0, income: 0 });
 
-      // Store unit totals
-      // For units, identify the leader (UM, SUM, or ADD)
-      // Use the leader's userName as unitManager for display (in canonical all-caps format)
+      // Store unit totals with reconciliation breakdown
+      // Use canonical unit key (canonicalUnitKey is: canonicalManager_canonicalAgency)
+      // IMPORTANT: The canonicalUnitKey is already in the format canonicalManager_canonicalAgency
+      // Extract the canonical manager from the key (everything before the last underscore)
+      // But actually, the key format is: canonicalManager_canonicalAgency
+      // So we need to find the leader's name to use as the unit manager
       const firstGoal = unitGoals[0];
-      const unitLeaderGoal = unitGoals.find(g => g.userRank === 'UM' || g.userRank === 'SUM' || g.userRank === 'ADD');
-      // Use leader's userName if found, otherwise use unitManager from first goal
-      const unitManagerName = unitLeaderGoal?.userName || firstGoal.unitManager;
-      // Canonicalize UM/SUM names to all caps for consistency
+      
+      // Prefer the leader's name if available, otherwise use the first goal's unitManager
+      // But make sure we use the canonical name that matches the key
+      let unitManagerName: string;
+      if (leaderGoal) {
+        unitManagerName = leaderGoal.userName;
+      } else {
+        // No leader in this unit - this shouldn't happen for proper units, but handle it
+        unitManagerName = firstGoal.unitManager || 'Unknown';
+      }
+      
       const canonicalUnitManager = getCanonicalName(unitManagerName);
       
-      agg.byUnit[unitName] = {
+      // Get agency from Users collection (source of truth), fallback to goal if not found
+      let canonicalAgencyName: string;
+      let userAgency = userAgencyMap.get(canonicalUnitManager);
+      if (!userAgency) {
+        // Try with original name (not canonicalized)
+        userAgency = userAgencyMap.get(unitManagerName);
+      }
+      if (userAgency) {
+        canonicalAgencyName = userAgency;
+      } else {
+        // Fallback to first goal's agency
+        canonicalAgencyName = getCanonicalAgencyName(firstGoal.agencyName);
+      }
+      
+      // Verify the canonicalUnitKey matches what we expect
+      const expectedUnitKey = `${canonicalUnitManager}_${canonicalAgencyName}`;
+      if (canonicalUnitKey !== expectedUnitKey) {
+        console.warn(`[ReportsPage] Unit key mismatch for unit manager ${canonicalUnitManager}. Expected: ${expectedUnitKey}, Actual: ${canonicalUnitKey}`);
+      }
+      
+      agg.byUnit[canonicalUnitKey] = {
         unitManager: canonicalUnitManager,
-        agencyName: firstGoal.agencyName,
+        agencyName: canonicalAgencyName,
         count: unitTotal.count,
         beginningManpowerBase: unitTotal.beginningManpowerBase,
         endManpower: unitTotal.endManpower,
-        manpower: unitTotal.manpower,
-        newRecruits: unitTotal.newRecruits,
-        fyp: unitTotal.fyp,
-        fyc: unitTotal.fyc,
+        newRecruits: unitRecruits, // Use reconciled recruits
+        fyp: unitFYP, // Use reconciled FYP
+        fyc: unitFYC, // Use reconciled FYC
         income: unitTotal.income,
+        // Reconciliation breakdown
+        leaderPersonalFYP,
+        leaderPersonalFYC,
+        leaderPersonalCases,
+        leaderPersonalRecruits,
+        leaderTeamFYP,
+        leaderTeamFYC,
+        advisorSumFYP: advisorSum.fyp,
+        advisorSumFYC: advisorSum.fyc,
+        advisorSumCases: advisorSum.cases,
+        advisorSumRecruits: advisorSum.recruits,
+        reconciliationMethod,
       };
     });
+
+    // STEP 2.5: Consolidate duplicate units (merge units with similar manager names in same agency)
+    // This is a safety net to catch any duplicates that weren't caught in the grouping step
+    // IMPORTANT: Only consolidate if names are truly the same person (all first names match)
+    const consolidatedByUnit: typeof agg.byUnit = {};
+    const unitKeysProcessed = new Set<string>();
+    
+    Object.entries(agg.byUnit).forEach(([unitKey, unitData]) => {
+      // Skip if already processed (merged into another unit)
+      if (unitKeysProcessed.has(unitKey)) {
+        return;
+      }
+      
+      // Check if there's another unit with a similar manager name in the same agency
+      // IMPORTANT: Use areNamesLikelySamePerson which now requires ALL first names to match
+      // This prevents "Maria Rosario" from being merged with "Maria Estrella"
+      let targetUnitKey = unitKey;
+      let targetUnitData = unitData;
+      
+      // Look for similar units to merge
+      Object.entries(agg.byUnit).forEach(([otherUnitKey, otherUnitData]) => {
+        if (otherUnitKey === unitKey || unitKeysProcessed.has(otherUnitKey)) {
+          return;
+        }
+        
+        // Check if same agency and similar manager names
+        const sameAgency = getCanonicalAgencyName(unitData.agencyName) === getCanonicalAgencyName(otherUnitData.agencyName);
+        const similarNames = areNamesLikelySamePerson(unitData.unitManager, otherUnitData.unitManager);
+        
+        if (sameAgency && similarNames) {
+          // Merge the other unit into this one
+          console.log(`[ReportsPage] Consolidating duplicate units: "${otherUnitKey}" into "${targetUnitKey}"`);
+          
+          // Merge the data (sum all values)
+          targetUnitData = {
+            ...targetUnitData,
+            count: targetUnitData.count + otherUnitData.count,
+            beginningManpowerBase: targetUnitData.beginningManpowerBase + otherUnitData.beginningManpowerBase,
+            endManpower: targetUnitData.endManpower + otherUnitData.endManpower,
+            newRecruits: targetUnitData.newRecruits + otherUnitData.newRecruits,
+            fyp: targetUnitData.fyp + otherUnitData.fyp,
+            fyc: targetUnitData.fyc + otherUnitData.fyc,
+            income: targetUnitData.income + otherUnitData.income,
+            // Merge reconciliation breakdown (use max for team targets, sum for others)
+            leaderPersonalFYP: (targetUnitData.leaderPersonalFYP || 0) + (otherUnitData.leaderPersonalFYP || 0),
+            leaderPersonalFYC: (targetUnitData.leaderPersonalFYC || 0) + (otherUnitData.leaderPersonalFYC || 0),
+            leaderPersonalCases: (targetUnitData.leaderPersonalCases || 0) + (otherUnitData.leaderPersonalCases || 0),
+            leaderPersonalRecruits: (targetUnitData.leaderPersonalRecruits || 0) + (otherUnitData.leaderPersonalRecruits || 0),
+            leaderTeamFYP: Math.max(targetUnitData.leaderTeamFYP || 0, otherUnitData.leaderTeamFYP || 0),
+            leaderTeamFYC: Math.max(targetUnitData.leaderTeamFYC || 0, otherUnitData.leaderTeamFYC || 0),
+            advisorSumFYP: (targetUnitData.advisorSumFYP || 0) + (otherUnitData.advisorSumFYP || 0),
+            advisorSumFYC: (targetUnitData.advisorSumFYC || 0) + (otherUnitData.advisorSumFYC || 0),
+            advisorSumCases: (targetUnitData.advisorSumCases || 0) + (otherUnitData.advisorSumCases || 0),
+            advisorSumRecruits: (targetUnitData.advisorSumRecruits || 0) + (otherUnitData.advisorSumRecruits || 0),
+            reconciliationMethod: targetUnitData.reconciliationMethod || otherUnitData.reconciliationMethod,
+          };
+          
+          // Mark the other unit as processed
+          unitKeysProcessed.add(otherUnitKey);
+        }
+      });
+      
+      // Add the (possibly merged) unit to consolidated results
+      consolidatedByUnit[targetUnitKey] = targetUnitData;
+      unitKeysProcessed.add(unitKey);
+    });
+    
+    // Replace agg.byUnit with consolidated version
+    agg.byUnit = consolidatedByUnit;
 
     // STEP 3: Calculate SUM totals from unit totals (SUM-level consolidation)
     // Use user records (userRankMap) as source of truth for ranks, not goal.userRank
@@ -726,7 +1370,6 @@ export default function ReportsPage() {
           count: 0,
           beginningManpowerBase: 0,
           endManpower: 0,
-          manpower: 0,
           newRecruits: 0,
           fyp: 0,
           fyc: 0,
@@ -737,7 +1380,6 @@ export default function ReportsPage() {
       agg.byAgency[canonicalAgencyName].count += unitData.count;
       agg.byAgency[canonicalAgencyName].beginningManpowerBase += unitData.beginningManpowerBase;
       agg.byAgency[canonicalAgencyName].endManpower += unitData.endManpower;
-      agg.byAgency[canonicalAgencyName].manpower += unitData.manpower;
       agg.byAgency[canonicalAgencyName].newRecruits += unitData.newRecruits;
       agg.byAgency[canonicalAgencyName].fyp += unitData.fyp;
       agg.byAgency[canonicalAgencyName].fyc += unitData.fyc;
@@ -746,7 +1388,7 @@ export default function ReportsPage() {
 
     // STEP 5: Calculate overall totals from agency totals
     Object.values(agg.byAgency).forEach(agencyData => {
-      agg.totalManpower += agencyData.manpower;
+      agg.totalManpower += agencyData.endManpower;
       agg.totalNewRecruits += agencyData.newRecruits;
       agg.totalFYP += agencyData.fyp;
       agg.totalFYC += agencyData.fyc;
@@ -812,7 +1454,8 @@ export default function ReportsPage() {
     setAggregated(agg);
   };
 
-  const filteredGoals = goals.filter(goal => {
+  // Use validGoals (filtered by valid agency names) instead of all goals, then apply additional filters
+  const filteredGoals = validGoals.filter(goal => {
     if (filterAgency !== 'all' && goal.agencyName !== filterAgency) return false;
     if (filterRank !== 'all' && goal.userRank !== filterRank) return false;
     if (filterSUM !== 'all') {
@@ -844,9 +1487,9 @@ export default function ReportsPage() {
     return true;
   });
 
-  // Get unique agencies using canonical names to deduplicate case variations
+  // Get unique agencies using canonical names from valid goals only
   const agenciesMap = new Map<string, string>(); // normalized -> canonical display name
-  goals.forEach(goal => {
+  validGoals.forEach(goal => {
     if (goal.agencyName) {
       const canonicalName = getCanonicalAgencyName(goal.agencyName);
       const normalized = canonicalName.toUpperCase();
@@ -856,7 +1499,10 @@ export default function ReportsPage() {
       }
     }
   });
-  const agencies = Array.from(agenciesMap.values()).sort();
+  // Only include agencies that exist in Users collection (source of truth)
+  const agencies = Array.from(agenciesMap.values())
+    .filter(agency => validAgencyNames.has(agency))
+    .sort();
   const ranks = Array.from(new Set(goals.map(g => g.userRank))).sort();
   
   // Get unique SUMs from user records (source of truth, not from goals)
@@ -872,8 +1518,8 @@ export default function ReportsPage() {
   
   // Get unique units - filter by agency if an agency is selected
   const unitsForFilter = filterAgency !== 'all'
-    ? goals.filter(g => g.agencyName === filterAgency)
-    : goals;
+    ? validGoals.filter(g => g.agencyName === filterAgency)
+    : validGoals;
   const units = Array.from(new Set(unitsForFilter.map(g => {
     const unitName = g.unitName || `${g.unitManager}_${g.agencyName}`;
     return unitName;
@@ -1140,9 +1786,36 @@ export default function ReportsPage() {
                         </tr>
                       </thead>
                       <tbody>
-                        {Object.entries(aggregated.byAgency).map(([agency, data]) => (
+                        {Object.entries(aggregated.byAgency).map(([agency, data]) => {
+                          const agencyGoals = filteredGoals.filter(g => getCanonicalAgencyName(g.agencyName || '') === agency);
+                          return (
                           <tr key={agency} className="border-b border-slate-100 hover:bg-slate-50">
-                            <td className="p-3 font-medium">{agency}</td>
+                              <td className="p-3 font-medium">
+                                <div className="flex items-center gap-2">
+                                  <span>{agency}</span>
+                                  <button
+                                    onClick={() => {
+                                      generateAgencySummaryPDF({
+                                        agencyName: agency,
+                                        goals: agencyGoals,
+                                        aggregatedData: {
+                                          totalUsers: data.count,
+                                          totalManpower: data.endManpower,
+                                          totalNewRecruits: data.newRecruits,
+                                          totalFYP: data.fyp,
+                                          totalFYC: data.fyc,
+                                          totalIncome: data.income,
+                                        },
+                                      });
+                                    }}
+                                    className="px-2 py-1 bg-[#D31145] text-white rounded hover:bg-red-700 transition-colors text-xs font-semibold flex items-center gap-1"
+                                    title="Download Agency Summary PDF"
+                                  >
+                                    <span>📥</span>
+                                    <span>PDF</span>
+                                  </button>
+                                </div>
+                              </td>
                             <td className="p-3 text-right">{data.count}</td>
                             <td className="p-3 text-right">{Math.round(data.beginningManpowerBase)}</td>
                             <td className="p-3 text-right">{Math.round(data.endManpower)}</td>
@@ -1151,7 +1824,8 @@ export default function ReportsPage() {
                             <td className="p-3 text-right">₱{formatNumberWithCommas(Math.round(data.fyc))}</td>
                             <td className="p-3 text-right">₱{formatNumberWithCommas(Math.round(data.income))}</td>
                           </tr>
-                        ))}
+                          );
+                        })}
                       </tbody>
                     </table>
                   </div>
@@ -1171,7 +1845,7 @@ export default function ReportsPage() {
                       <div className="text-left flex-1">
                         <h2 className="text-xl font-bold text-slate-900">Summary by Unit</h2>
                         <p className="text-sm text-slate-600 mt-1">
-                          Unit totals are consolidated from individual advisor/leader goals within each unit.
+                          Unit totals = Leader Personal + max(Leader Team, Advisor Sum). If Leader Team &gt; Advisor Sum, uses Leader Team (accounts for advisors not yet submitting and new recruits). Otherwise uses Advisor Sum.
                         </p>
                       </div>
                     </div>
@@ -1224,18 +1898,332 @@ export default function ReportsPage() {
                                     </tr>
                                   </thead>
                                   <tbody>
-                                    {sortedUnits.map(([unitName, data]) => (
-                                      <tr key={unitName} className="border-b border-slate-100 hover:bg-slate-50">
-                                        <td className="p-3 font-medium">{getCanonicalName(data.unitManager)}</td>
-                                        <td className="p-3 text-right">{data.count}</td>
-                                        <td className="p-3 text-right">{Math.round(data.beginningManpowerBase)}</td>
-                                        <td className="p-3 text-right">{Math.round(data.endManpower)}</td>
-                                        <td className="p-3 text-right">{Math.round(data.newRecruits)}</td>
-                                        <td className="p-3 text-right">₱{formatNumberWithCommas(Math.round(data.fyp))}</td>
-                                        <td className="p-3 text-right">₱{formatNumberWithCommas(Math.round(data.fyc))}</td>
-                                        <td className="p-3 text-right">₱{formatNumberWithCommas(Math.round(data.income))}</td>
-                                      </tr>
-                                    ))}
+                                    {sortedUnits.map(([canonicalUnitKey, data]) => {
+                                      // Find goals that belong to this unit using flexible name matching
+                                      // Extract the unit manager name and agency from the canonicalUnitKey
+                                      const keyParts = canonicalUnitKey.split('_');
+                                      const unitManagerFromKey = keyParts[0]; // First part is the canonical manager name
+                                      const agencyFromKey = keyParts.slice(1).join('_'); // Rest is the agency
+                                      
+                                      const unitGoals = filteredGoals.filter(g => {
+                                        const isLeader = g.userRank === 'UM' || g.userRank === 'SUM' || g.userRank === 'ADD';
+                                        const goalCanonicalAgency = getCanonicalAgencyName(g.agencyName);
+                                        
+                                        // Check if agency matches first
+                                        if (goalCanonicalAgency !== agencyFromKey) {
+                                          return false;
+                                        }
+                                        
+                                        // For leaders, check if their name matches the unit manager
+                                        if (isLeader) {
+                                          const leaderCanonicalName = getCanonicalName(g.userName);
+                                          // Use flexible name matching to handle variations
+                                          return areNamesLikelySamePerson(leaderCanonicalName, unitManagerFromKey);
+                                        } else {
+                                          // For advisors, check if their unitManager matches the unit manager
+                                          // Use flexible name matching to handle name variations (e.g., "DARLYN PEREZ" vs "DARLYN L. PEREZ")
+                                          const matches = areNamesLikelySamePerson(g.unitManager || 'Unknown', unitManagerFromKey);
+                                          // Debug logging for advisors not matching
+                                          if (!matches && g.unitManager) {
+                                            console.log(`[ReportsPage] Advisor "${g.userName}" (unitManager: "${g.unitManager}") not matched to unit manager "${unitManagerFromKey}" in unit "${canonicalUnitKey}"`);
+                                          }
+                                          return matches;
+                                        }
+                                      });
+                                      
+                                      // Debug: Log unit goals found
+                                      if (unitGoals.length !== data.count) {
+                                        console.warn(`[ReportsPage] Unit "${canonicalUnitKey}" (${data.unitManager}): Expected ${data.count} goals, found ${unitGoals.length} goals. Leader goals: ${unitGoals.filter(g => g.userRank === 'UM' || g.userRank === 'SUM' || g.userRank === 'ADD').length}, Advisor goals: ${unitGoals.filter(g => g.userRank !== 'UM' && g.userRank !== 'SUM' && g.userRank !== 'ADD').length}`);
+                                      }
+                                      
+                                      const isExpanded = isUnitManagerExpanded(canonicalUnitKey);
+                                      const unitTotals = calculateReconciledUnitTotals(unitGoals);
+                                      
+                                      return (
+                                        <React.Fragment key={canonicalUnitKey}>
+                                          <tr 
+                                            className="border-b border-slate-100 hover:bg-slate-50 cursor-pointer"
+                                            onClick={() => toggleUnitManager(canonicalUnitKey)}
+                                          >
+                                            <td className="p-3 font-medium">
+                                              <div className="flex items-center gap-2">
+                                                <i className={`fa-solid ${isExpanded ? 'fa-chevron-down' : 'fa-chevron-right'} text-slate-600 transition-transform duration-200 text-xs`}></i>
+                                                <span>{getCanonicalName(data.unitManager)}</span>
+                                                <button
+                                                  onClick={(e) => {
+                                                    e.stopPropagation();
+                                                    generateUnitSummaryPDF({
+                                                      unitManager: data.unitManager,
+                                                      agencyName: data.agencyName,
+                                                      goals: unitGoals,
+                                                    });
+                                                  }}
+                                                  className="px-2 py-1 bg-[#D31145] text-white rounded hover:bg-red-700 transition-colors text-xs font-semibold flex items-center gap-1"
+                                                  title="Download Unit Summary PDF"
+                                                >
+                                                  <span>📥</span>
+                                                  <span>PDF</span>
+                                                </button>
+                                              </div>
+                                            </td>
+                                            <td className="p-3 text-right">{data.count}</td>
+                                            <td className="p-3 text-right">{Math.round(data.beginningManpowerBase)}</td>
+                                            <td className="p-3 text-right">{Math.round(data.endManpower)}</td>
+                                            <td className="p-3 text-right">{Math.round(data.newRecruits)}</td>
+                                            <td className="p-3 text-right">₱{formatNumberWithCommas(Math.round(data.fyp))}</td>
+                                            <td className="p-3 text-right">₱{formatNumberWithCommas(Math.round(data.fyc))}</td>
+                                            <td className="p-3 text-right">₱{formatNumberWithCommas(Math.round(data.income))}</td>
+                                          </tr>
+                                          
+                                          {/* Expanded Individual Reports Row */}
+                                          {isExpanded && (
+                                            <tr key={`${canonicalUnitKey}-details`} className="bg-slate-50">
+                                              <td colSpan={8} className="p-4">
+                                                <div className="space-y-4">
+                                                  {/* Individual Member Reports */}
+                                                  <div>
+                                                    <div className="flex items-center gap-2 mb-3">
+                                                      <h4 className="text-sm font-semibold text-slate-700">Individual Member Reports</h4>
+                                                      {/* Reconciliation Breakdown Tooltip */}
+                                                      <div className="relative group">
+                                                        <button
+                                                          type="button"
+                                                          className="text-blue-600 hover:text-blue-800 focus:outline-none"
+                                                          title="View Unit Reconciliation Breakdown"
+                                                        >
+                                                          <i className="fa-solid fa-circle-info text-sm"></i>
+                                                        </button>
+                                                        {/* Tooltip Content */}
+                                                        <div className="absolute left-0 top-6 z-50 w-80 p-4 bg-blue-50 border-2 border-blue-200 rounded-lg shadow-lg opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all duration-200 pointer-events-none">
+                                                          <p className="text-xs font-semibold text-blue-900 mb-2">Unit Reconciliation Breakdown:</p>
+                                                          <div className="grid grid-cols-2 gap-3 text-xs mb-2">
+                                                            <div>
+                                                              <p className="text-blue-700">Leader Personal FYP</p>
+                                                              <p className="font-semibold text-blue-900">₱{formatNumberWithCommas(Math.round(unitTotals.leaderPersonalFYP || 0))}</p>
+                                                            </div>
+                                                            <div>
+                                                              <p className="text-blue-700">Leader Team FYP</p>
+                                                              <p className="font-semibold text-blue-900">₱{formatNumberWithCommas(Math.round(unitTotals.leaderTeamFYP || 0))}</p>
+                                                            </div>
+                                                            <div>
+                                                              <p className="text-blue-700">Advisor Sum FYP</p>
+                                                              <p className="font-semibold text-blue-900">₱{formatNumberWithCommas(Math.round(unitTotals.advisorSumFYP || 0))}</p>
+                                                            </div>
+                                                            <div>
+                                                              <p className="text-blue-700">Unit Total FYP</p>
+                                                              <p className="font-semibold text-blue-900">₱{formatNumberWithCommas(Math.round(unitTotals.fyp))}</p>
+                                                            </div>
+                                                          </div>
+                                                          <p className="text-xs text-blue-700">
+                                                            <span className="font-semibold">Formula:</span> Leader Personal + max(Leader Team, Advisor Sum) = {formatNumberWithCommas(Math.round(unitTotals.leaderPersonalFYP || 0))} + max({formatNumberWithCommas(Math.round(unitTotals.leaderTeamFYP || 0))}, {formatNumberWithCommas(Math.round(unitTotals.advisorSumFYP || 0))}) = {formatNumberWithCommas(Math.round(unitTotals.fyp))}
+                                                          </p>
+                                                        </div>
+                                                      </div>
+                                                    </div>
+                                                    <div className="space-y-2">
+                                                      {/* Show leader goal first if exists */}
+                                                      {unitGoals
+                                                        .filter(g => g.userRank === 'UM' || g.userRank === 'SUM' || g.userRank === 'ADD')
+                                                        .sort((a, b) => formatDisplayName(a.userName).localeCompare(formatDisplayName(b.userName)))
+                                                        .map((goal) => {
+                                                          // Calculate Personal FYP/FYC from quarterly goals
+                                                          // NOTE: For leaders, q1.fyc contains (Personal + Team), so we need to subtract team component
+                                                          // Team quarterly = monthlyTeamTarget * 3 (since quarterly = 3 months)
+                                                          const quarterlyTeamFYC = goal.monthlyTeamTargetFYC ? (goal.monthlyTeamTargetFYC * 3) : 0;
+                                                          const quarterlyTeamFYP = goal.monthlyTeamTargetFYP ? (goal.monthlyTeamTargetFYP * 3) : 0;
+                                                          
+                                                          // Personal = Total (q1+q2+q3+q4) - Team (monthly * 3 * 4 quarters)
+                                                          let totalFYC = (goal.q1?.fyc || 0) + (goal.q2?.fyc || 0) + (goal.q3?.fyc || 0) + (goal.q4?.fyc || 0);
+                                                          let totalFYP = (goal.q1?.fyp || 0) + (goal.q2?.fyp || 0) + (goal.q3?.fyp || 0) + (goal.q4?.fyp || 0);
+                                                          
+                                                          const annualTeamFYC = goal.monthlyTeamTargetFYC ? (goal.monthlyTeamTargetFYC * 12) : 0;
+                                                          const annualTeamFYP = goal.monthlyTeamTargetFYP ? (goal.monthlyTeamTargetFYP * 12) : 0;
+                                                          
+                                                          // Calculate Personal FYP/FYC
+                                                          // If quarterly values exist, use them (Total - Team)
+                                                          // If quarterly values are zero but monthly target is set, use monthly target as fallback
+                                                          // If result is zero/negative (data inconsistency), use monthly target as fallback
+                                                          let personalFYP: number;
+                                                          let personalFYC: number;
+                                                          
+                                                          if (totalFYP > 0) {
+                                                            // Quarterly values exist - subtract team component
+                                                            const calculatedPersonalFYP = totalFYP - annualTeamFYP;
+                                                            if (calculatedPersonalFYP > 0) {
+                                                              personalFYP = calculatedPersonalFYP;
+                                                            } else if (goal.monthlyTargetFYP && goal.monthlyTargetFYP > 0) {
+                                                              // Result is zero/negative - likely data inconsistency, use monthly target as fallback
+                                                              // Monthly target FYP is personal-only, so use it directly * 12
+                                                              personalFYP = goal.monthlyTargetFYP * 12;
+                                                            } else {
+                                                              personalFYP = 0;
+                                                            }
+                                                          } else if (goal.monthlyTargetFYP && goal.monthlyTargetFYP > 0) {
+                                                            // Fallback: Use monthly target FYP * 12 (annual) as personal FYP (monthly target is personal-only)
+                                                            personalFYP = goal.monthlyTargetFYP * 12;
+                                                          } else {
+                                                            personalFYP = 0;
+                                                          }
+                                                          
+                                                          if (totalFYC > 0) {
+                                                            // Quarterly values exist - subtract team component
+                                                            const calculatedPersonalFYC = totalFYC - annualTeamFYC;
+                                                            if (calculatedPersonalFYC > 0) {
+                                                              personalFYC = calculatedPersonalFYC;
+                                                            } else if (goal.monthlyTargetFYC && goal.monthlyTargetFYC > 0) {
+                                                              // Result is zero/negative - likely data inconsistency, use monthly target as fallback
+                                                              // Monthly target FYC is personal-only, so use it directly * 12
+                                                              personalFYC = goal.monthlyTargetFYC * 12;
+                                                            } else {
+                                                              personalFYC = 0;
+                                                            }
+                                                          } else if (goal.monthlyTargetFYC && goal.monthlyTargetFYC > 0) {
+                                                            // Fallback: Use monthly target FYC * 12 (annual) as personal FYC (monthly target is personal-only)
+                                                            personalFYC = goal.monthlyTargetFYC * 12;
+                                                          } else {
+                                                            personalFYC = 0;
+                                                          }
+                                                          
+                                                          return (
+                                                          <div
+                                                            key={goal.userId || goal.userName}
+                                                            className="bg-white rounded-lg p-4 border border-slate-200 hover:shadow-md transition-shadow"
+                                                          >
+                                                            <div className="flex items-center justify-between">
+                                                              <div className="flex-1">
+                                                                <div className="flex items-center gap-3">
+                                                                  <h4 className="font-semibold text-slate-900">{formatDisplayName(goal.userName)}</h4>
+                                                                  <span className="px-2 py-1 bg-blue-100 text-blue-700 rounded text-xs font-medium">
+                                                                    {goal.userRank} (Leader)
+                                                                  </span>
+                                                                </div>
+                                                                <div className="mt-2 grid grid-cols-2 md:grid-cols-4 gap-3 text-sm">
+                                                                  <div>
+                                                                    <p className="text-slate-500">Personal FYP</p>
+                                                                    <p className="font-semibold text-slate-900">₱{formatNumberWithCommas(Math.round(personalFYP))}</p>
+                                                                  </div>
+                                                                  <div>
+                                                                    <p className="text-slate-500">Personal FYC</p>
+                                                                    <p className="font-semibold text-slate-900">₱{formatNumberWithCommas(Math.round(personalFYC))}</p>
+                                                                  </div>
+                                                                  <div>
+                                                                    <p className="text-slate-500">Manpower</p>
+                                                                    <p className="font-semibold text-slate-900">{Math.round(goal.annualManpower)}</p>
+                                                                  </div>
+                                                                  <div>
+                                                                    <p className="text-slate-500">Income</p>
+                                                                    <p className="font-semibold text-slate-900">₱{formatNumberWithCommas(Math.round(goal.annualIncome))}</p>
+                                                                  </div>
+                                                                </div>
+                                                                {goal.monthlyTeamTargetFYP && goal.monthlyTeamTargetFYP > 0 && (
+                                                                  <div className="mt-2 text-xs text-slate-600">
+                                                                    <span className="font-semibold">Team Target:</span> Monthly FYP ₱{formatNumberWithCommas(Math.round(goal.monthlyTeamTargetFYP))} (Annual: ₱{formatNumberWithCommas(Math.round(goal.monthlyTeamTargetFYP * 12))})
+                                                                  </div>
+                                                                )}
+                                                              </div>
+                                                              <div className="ml-4 flex items-center gap-2">
+                                                                <button
+                                                                  onClick={() => setSelectedGoal(goal)}
+                                                                  className="px-3 py-1.5 bg-blue-600 text-white rounded hover:bg-blue-700 transition-colors text-sm font-semibold"
+                                                                >
+                                                                  View Details
+                                                                </button>
+                                                                <button
+                                                                  onClick={() => {
+                                                                    generateStrategicPlanningPDF({
+                                                                      userName: goal.userName,
+                                                                      unitManager: goal.unitManager,
+                                                                      agencyName: goal.agencyName,
+                                                                      goal,
+                                                                    });
+                                                                  }}
+                                                                  className="px-3 py-1.5 bg-green-600 text-white rounded hover:bg-green-700 transition-colors text-sm font-semibold flex items-center gap-1"
+                                                                >
+                                                                  <span>📥</span>
+                                                                  <span>PDF</span>
+                                                                </button>
+                                                              </div>
+                                                            </div>
+                                                          </div>
+                                                        );
+                                                        })}
+                                                      {/* Then show advisor goals */}
+                                                      {unitGoals
+                                                        .filter(g => g.userRank !== 'UM' && g.userRank !== 'SUM' && g.userRank !== 'ADD')
+                                                        .sort((a, b) => formatDisplayName(a.userName).localeCompare(formatDisplayName(b.userName)))
+                                                        .map((goal) => {
+                                                          // Calculate FYP/FYC from quarterly goals (advisors only have personal goals)
+                                                          const advisorFYP = (goal.q1?.fyp || 0) + (goal.q2?.fyp || 0) + (goal.q3?.fyp || 0) + (goal.q4?.fyp || 0);
+                                                          const advisorFYC = (goal.q1?.fyc || 0) + (goal.q2?.fyc || 0) + (goal.q3?.fyc || 0) + (goal.q4?.fyc || 0);
+                                                          
+                                                          return (
+                                                          <div
+                                                            key={goal.userId || goal.userName}
+                                                            className="bg-white rounded-lg p-4 border border-slate-200 hover:shadow-md transition-shadow"
+                                                          >
+                                                            <div className="flex items-center justify-between">
+                                                              <div className="flex-1">
+                                                                <div className="flex items-center gap-3">
+                                                                  <h4 className="font-semibold text-slate-900">{formatDisplayName(goal.userName)}</h4>
+                                                                  <span className="px-2 py-1 bg-slate-100 text-slate-700 rounded text-xs font-medium">
+                                                                    {goal.userRank}
+                                                                  </span>
+                                                                </div>
+                                                                <div className="mt-2 grid grid-cols-2 md:grid-cols-4 gap-3 text-sm">
+                                                                  <div>
+                                                                    <p className="text-slate-500">FYP</p>
+                                                                    <p className="font-semibold text-slate-900">₱{formatNumberWithCommas(Math.round(advisorFYP))}</p>
+                                                                  </div>
+                                                                  <div>
+                                                                    <p className="text-slate-500">FYC</p>
+                                                                    <p className="font-semibold text-slate-900">₱{formatNumberWithCommas(Math.round(advisorFYC))}</p>
+                                                                  </div>
+                                                                  <div>
+                                                                    <p className="text-slate-500">Manpower</p>
+                                                                    <p className="font-semibold text-slate-900">{Math.round(goal.annualManpower)}</p>
+                                                                  </div>
+                                                                  <div>
+                                                                    <p className="text-slate-500">Income</p>
+                                                                    <p className="font-semibold text-slate-900">₱{formatNumberWithCommas(Math.round(goal.annualIncome))}</p>
+                                                                  </div>
+                                                                </div>
+                                                              </div>
+                                                              <div className="ml-4 flex items-center gap-2">
+                                                                <button
+                                                                  onClick={() => setSelectedGoal(goal)}
+                                                                  className="px-3 py-1.5 bg-blue-600 text-white rounded hover:bg-blue-700 transition-colors text-sm font-semibold"
+                                                                >
+                                                                  View Details
+                                                                </button>
+                                                                <button
+                                                                  onClick={() => {
+                                                                    generateStrategicPlanningPDF({
+                                                                      userName: goal.userName,
+                                                                      unitManager: goal.unitManager,
+                                                                      agencyName: goal.agencyName,
+                                                                      goal,
+                                                                    });
+                                                                  }}
+                                                                  className="px-3 py-1.5 bg-green-600 text-white rounded hover:bg-green-700 transition-colors text-sm font-semibold flex items-center gap-1"
+                                                                  title="Download Individual PDF"
+                                                                >
+                                                                  <span>📥</span>
+                                                                  <span>PDF</span>
+                                                                </button>
+                                                              </div>
+                                                            </div>
+                                                          </div>
+                                                        );
+                                                        })}
+                                                    </div>
+                                                  </div>
+                                                </div>
+                                              </td>
+                                            </tr>
+                                          )}
+                                        </React.Fragment>
+                                      );
+                                    })}
                                   </tbody>
                                 </table>
                               </div>
@@ -1362,26 +2350,11 @@ export default function ReportsPage() {
                 </div>
               )}
 
-              {/* Individual Reports */}
-              <div className="bg-white rounded-lg shadow-md p-6">
-                <h2 className="text-xl font-bold text-slate-900 mb-4">
-                  Individual Reports ({filteredGoals.length})
-                </h2>
-                
-                {filteredGoals.length === 0 ? (
-                  <div className="p-8 text-center text-slate-500">
-                    No reports found. Users need to submit their strategic planning goals.
-                  </div>
-                ) : (
-                  <div className="p-8 text-center text-slate-500">
-                    Individual Reports display - To be implemented
-                  </div>
-                )}
-              </div>
-              {/* Detail Modal */}
-              {selectedGoal && (
-                <div className="fixed inset-0 bg-black/50 flex items-center justify-center p-4 z-50" onClick={() => setSelectedGoal(null)}>
-                  <div className="bg-white rounded-lg shadow-xl max-w-4xl w-full max-h-[90vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
+              {/* Individual Reports section removed - now integrated into Unit Summary above as expandable rows */}
+          {/* Detail Modal */}
+          {selectedGoal && (
+            <div className="fixed inset-0 bg-black/50 flex items-center justify-center p-4 z-50" onClick={() => setSelectedGoal(null)}>
+              <div className="bg-white rounded-lg shadow-xl max-w-4xl w-full max-h-[90vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
                 <div className="sticky top-0 bg-[#D31145] text-white p-4 flex justify-between items-center">
                   <h3 className="text-xl font-bold">Report Details - {formatDisplayName(selectedGoal.userName)}</h3>
                   <button

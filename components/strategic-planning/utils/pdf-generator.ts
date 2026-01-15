@@ -283,3 +283,391 @@ export function generateStrategicPlanningPDF(data: PDFReportData): void {
   doc.save(fileName);
 }
 
+interface UnitSummaryPDFData {
+  unitManager: string;
+  agencyName: string;
+  goals: StrategicPlanningGoal[];
+}
+
+export function generateUnitSummaryPDF(data: UnitSummaryPDFData): void {
+  const { unitManager, agencyName, goals } = data;
+  
+  const doc = new jsPDF();
+  const pageWidth = doc.internal.pageSize.getWidth();
+  const pageHeight = doc.internal.pageSize.getHeight();
+  const margin = 15;
+  let yPos = margin;
+  
+  const checkPageBreak = (requiredSpace: number) => {
+    if (yPos + requiredSpace > pageHeight - margin) {
+      doc.addPage();
+      yPos = margin;
+    }
+  };
+  
+  // Title
+  doc.setFontSize(20);
+  doc.setTextColor(211, 17, 69);
+  doc.setFont('helvetica', 'bold');
+  doc.text('Unit Summary Report 2026', pageWidth / 2, yPos, { align: 'center' });
+  yPos += 10;
+  
+  // Unit Info
+  doc.setFontSize(14);
+  doc.setTextColor(0, 0, 0);
+  doc.setFont('helvetica', 'bold');
+  doc.text('Unit Information', margin, yPos);
+  yPos += 8;
+  
+  doc.setFontSize(11);
+  doc.setFont('helvetica', 'normal');
+  doc.text(`Unit Manager: ${unitManager}`, margin, yPos);
+  yPos += 6;
+  doc.text(`Agency: ${agencyName}`, margin, yPos);
+  yPos += 6;
+  doc.text(`Total Members: ${goals.length}`, margin, yPos);
+  yPos += 10;
+  
+  // Calculate totals
+  const totals = goals.reduce((acc, goal) => {
+    acc.manpower += goal.annualManpower || 0;
+    acc.fyp += goal.annualFYP || 0;
+    acc.fyc += goal.annualFYC || 0;
+    acc.income += goal.annualIncome || 0;
+    acc.newRecruits += (goal.q1?.newRecruits || 0) + (goal.q2?.newRecruits || 0) + 
+                       (goal.q3?.newRecruits || 0) + (goal.q4?.newRecruits || 0);
+    return acc;
+  }, { manpower: 0, fyp: 0, fyc: 0, income: 0, newRecruits: 0 });
+  
+  // Summary Totals
+  checkPageBreak(40);
+  doc.setFontSize(14);
+  doc.setFont('helvetica', 'bold');
+  doc.text('Unit Totals', margin, yPos);
+  yPos += 8;
+  
+  doc.setFontSize(11);
+  doc.setFont('helvetica', 'normal');
+  const summaryRows = [
+    ['Total Manpower', totals.manpower.toString()],
+    ['Total New Recruits', totals.newRecruits.toString()],
+    ['Total Annual FYP', `₱${totals.fyp.toLocaleString()}`],
+    ['Total Annual FYC', `₱${totals.fyc.toLocaleString()}`],
+    ['Total Annual Income', `₱${totals.income.toLocaleString()}`],
+  ];
+  
+  const colWidths = [100, 80];
+  let xPos = margin;
+  
+  doc.setFillColor(211, 17, 69);
+  doc.rect(xPos, yPos - 5, colWidths[0], 7, 'F');
+  doc.rect(xPos + colWidths[0], yPos - 5, colWidths[1], 7, 'F');
+  doc.setTextColor(255, 255, 255);
+  doc.setFont('helvetica', 'bold');
+  doc.text('Metric', xPos + 2, yPos);
+  doc.text('Total', xPos + colWidths[0] + 2, yPos);
+  yPos += 7;
+  
+  doc.setDrawColor(200, 200, 200);
+  doc.setTextColor(0, 0, 0);
+  doc.setFont('helvetica', 'normal');
+  
+  summaryRows.forEach((row) => {
+    checkPageBreak(8);
+    doc.rect(xPos, yPos - 5, colWidths[0], 7);
+    doc.rect(xPos + colWidths[0], yPos - 5, colWidths[1], 7);
+    doc.text(row[0], xPos + 2, yPos);
+    doc.text(row[1], xPos + colWidths[0] + 2, yPos);
+    yPos += 7;
+  });
+  
+  yPos += 10;
+  
+  // Individual Members Table
+  checkPageBreak(30);
+  doc.setFontSize(14);
+  doc.setFont('helvetica', 'bold');
+  doc.text('Individual Members', margin, yPos);
+  yPos += 8;
+  
+  doc.setFontSize(9);
+  const memberColWidths = [50, 30, 35, 35];
+  xPos = margin;
+  
+  // Header
+  doc.setFillColor(211, 17, 69);
+  doc.rect(xPos, yPos - 5, memberColWidths[0], 7, 'F');
+  doc.rect(xPos + memberColWidths[0], yPos - 5, memberColWidths[1], 7, 'F');
+  doc.rect(xPos + memberColWidths[0] + memberColWidths[1], yPos - 5, memberColWidths[2], 7, 'F');
+  doc.rect(xPos + memberColWidths[0] + memberColWidths[1] + memberColWidths[2], yPos - 5, memberColWidths[3], 7, 'F');
+  doc.setTextColor(255, 255, 255);
+  doc.setFont('helvetica', 'bold');
+  doc.text('Name', xPos + 2, yPos);
+  doc.text('Rank', xPos + memberColWidths[0] + 2, yPos);
+  doc.text('FYP', xPos + memberColWidths[0] + memberColWidths[1] + 2, yPos);
+  doc.text('FYC', xPos + memberColWidths[0] + memberColWidths[1] + memberColWidths[2] + 2, yPos);
+  yPos += 7;
+  
+  doc.setDrawColor(200, 200, 200);
+  doc.setTextColor(0, 0, 0);
+  doc.setFont('helvetica', 'normal');
+  
+  goals.forEach((goal) => {
+    checkPageBreak(10);
+    xPos = margin;
+    doc.rect(xPos, yPos - 5, memberColWidths[0], 7);
+    doc.text(goal.userName.length > 20 ? goal.userName.substring(0, 17) + '...' : goal.userName, xPos + 2, yPos);
+    
+    xPos += memberColWidths[0];
+    doc.rect(xPos, yPos - 5, memberColWidths[1], 7);
+    doc.text(goal.userRank, xPos + 2, yPos);
+    
+    xPos += memberColWidths[1];
+    doc.rect(xPos, yPos - 5, memberColWidths[2], 7);
+    doc.text(`₱${Math.round(goal.annualFYP).toLocaleString()}`, xPos + 2, yPos);
+    
+    xPos += memberColWidths[2];
+    doc.rect(xPos, yPos - 5, memberColWidths[3], 7);
+    doc.text(`₱${Math.round(goal.annualFYC).toLocaleString()}`, xPos + 2, yPos);
+    
+    yPos += 7;
+  });
+  
+  // Footer
+  const totalPages = doc.getNumberOfPages();
+  for (let i = 1; i <= totalPages; i++) {
+    doc.setPage(i);
+    doc.setFontSize(8);
+    doc.setTextColor(128, 128, 128);
+    doc.text(`Page ${i} of ${totalPages}`, pageWidth / 2, pageHeight - 10, { align: 'center' });
+  }
+  
+  const fileName = `Unit_Summary_${unitManager.replace(/\s+/g, '_')}_${Date.now()}.pdf`;
+  doc.save(fileName);
+}
+
+interface SUMSummaryPDFData {
+  sumName: string;
+  agencyName: string;
+  goals: StrategicPlanningGoal[];
+}
+
+export function generateSUMSummaryPDF(data: SUMSummaryPDFData): void {
+  const { sumName, agencyName, goals } = data;
+  
+  const doc = new jsPDF();
+  const pageWidth = doc.internal.pageSize.getWidth();
+  const pageHeight = doc.internal.pageSize.getHeight();
+  const margin = 15;
+  let yPos = margin;
+  
+  const checkPageBreak = (requiredSpace: number) => {
+    if (yPos + requiredSpace > pageHeight - margin) {
+      doc.addPage();
+      yPos = margin;
+    }
+  };
+  
+  // Title
+  doc.setFontSize(20);
+  doc.setTextColor(211, 17, 69);
+  doc.setFont('helvetica', 'bold');
+  doc.text('SUM Summary Report 2026', pageWidth / 2, yPos, { align: 'center' });
+  yPos += 10;
+  
+  // SUM Info
+  doc.setFontSize(14);
+  doc.setTextColor(0, 0, 0);
+  doc.setFont('helvetica', 'bold');
+  doc.text('SUM Information', margin, yPos);
+  yPos += 8;
+  
+  doc.setFontSize(11);
+  doc.setFont('helvetica', 'normal');
+  doc.text(`SUM: ${sumName}`, margin, yPos);
+  yPos += 6;
+  doc.text(`Agency: ${agencyName}`, margin, yPos);
+  yPos += 6;
+  doc.text(`Total Members: ${goals.length}`, margin, yPos);
+  yPos += 10;
+  
+  // Calculate totals
+  const totals = goals.reduce((acc, goal) => {
+    acc.manpower += goal.annualManpower || 0;
+    acc.fyp += goal.annualFYP || 0;
+    acc.fyc += goal.annualFYC || 0;
+    acc.income += goal.annualIncome || 0;
+    acc.newRecruits += (goal.q1?.newRecruits || 0) + (goal.q2?.newRecruits || 0) + 
+                       (goal.q3?.newRecruits || 0) + (goal.q4?.newRecruits || 0);
+    return acc;
+  }, { manpower: 0, fyp: 0, fyc: 0, income: 0, newRecruits: 0 });
+  
+  // Summary Totals
+  checkPageBreak(40);
+  doc.setFontSize(14);
+  doc.setFont('helvetica', 'bold');
+  doc.text('SUM Totals', margin, yPos);
+  yPos += 8;
+  
+  doc.setFontSize(11);
+  doc.setFont('helvetica', 'normal');
+  const summaryRows = [
+    ['Total Manpower', totals.manpower.toString()],
+    ['Total New Recruits', totals.newRecruits.toString()],
+    ['Total Annual FYP', `₱${totals.fyp.toLocaleString()}`],
+    ['Total Annual FYC', `₱${totals.fyc.toLocaleString()}`],
+    ['Total Annual Income', `₱${totals.income.toLocaleString()}`],
+  ];
+  
+  const colWidths = [100, 80];
+  let xPos = margin;
+  
+  doc.setFillColor(211, 17, 69);
+  doc.rect(xPos, yPos - 5, colWidths[0], 7, 'F');
+  doc.rect(xPos + colWidths[0], yPos - 5, colWidths[1], 7, 'F');
+  doc.setTextColor(255, 255, 255);
+  doc.setFont('helvetica', 'bold');
+  doc.text('Metric', xPos + 2, yPos);
+  doc.text('Total', xPos + colWidths[0] + 2, yPos);
+  yPos += 7;
+  
+  doc.setDrawColor(200, 200, 200);
+  doc.setTextColor(0, 0, 0);
+  doc.setFont('helvetica', 'normal');
+  
+  summaryRows.forEach((row) => {
+    checkPageBreak(8);
+    doc.rect(xPos, yPos - 5, colWidths[0], 7);
+    doc.rect(xPos + colWidths[0], yPos - 5, colWidths[1], 7);
+    doc.text(row[0], xPos + 2, yPos);
+    doc.text(row[1], xPos + colWidths[0] + 2, yPos);
+    yPos += 7;
+  });
+  
+  // Footer
+  const totalPages = doc.getNumberOfPages();
+  for (let i = 1; i <= totalPages; i++) {
+    doc.setPage(i);
+    doc.setFontSize(8);
+    doc.setTextColor(128, 128, 128);
+    doc.text(`Page ${i} of ${totalPages}`, pageWidth / 2, pageHeight - 10, { align: 'center' });
+  }
+  
+  const fileName = `SUM_Summary_${sumName.replace(/\s+/g, '_')}_${Date.now()}.pdf`;
+  doc.save(fileName);
+}
+
+interface AgencySummaryPDFData {
+  agencyName: string;
+  goals: StrategicPlanningGoal[];
+  aggregatedData?: {
+    totalUsers: number;
+    totalManpower: number;
+    totalNewRecruits: number;
+    totalFYP: number;
+    totalFYC: number;
+    totalIncome: number;
+  };
+}
+
+export function generateAgencySummaryPDF(data: AgencySummaryPDFData): void {
+  const { agencyName, goals, aggregatedData } = data;
+  
+  const doc = new jsPDF();
+  const pageWidth = doc.internal.pageSize.getWidth();
+  const pageHeight = doc.internal.pageSize.getHeight();
+  const margin = 15;
+  let yPos = margin;
+  
+  const checkPageBreak = (requiredSpace: number) => {
+    if (yPos + requiredSpace > pageHeight - margin) {
+      doc.addPage();
+      yPos = margin;
+    }
+  };
+  
+  // Title
+  doc.setFontSize(20);
+  doc.setTextColor(211, 17, 69);
+  doc.setFont('helvetica', 'bold');
+  doc.text('Agency Summary Report 2026', pageWidth / 2, yPos, { align: 'center' });
+  yPos += 10;
+  
+  // Agency Info
+  doc.setFontSize(14);
+  doc.setTextColor(0, 0, 0);
+  doc.setFont('helvetica', 'bold');
+  doc.text('Agency Information', margin, yPos);
+  yPos += 8;
+  
+  doc.setFontSize(11);
+  doc.setFont('helvetica', 'normal');
+  doc.text(`Agency: ${agencyName}`, margin, yPos);
+  yPos += 6;
+  doc.text(`Total Members: ${aggregatedData?.totalUsers || goals.length}`, margin, yPos);
+  yPos += 10;
+  
+  // Summary Totals
+  checkPageBreak(40);
+  doc.setFontSize(14);
+  doc.setFont('helvetica', 'bold');
+  doc.text('Agency Totals', margin, yPos);
+  yPos += 8;
+  
+  doc.setFontSize(11);
+  doc.setFont('helvetica', 'normal');
+  const totals = aggregatedData || {
+    totalUsers: goals.length,
+    totalManpower: goals.reduce((sum, g) => sum + (g.annualManpower || 0), 0),
+    totalNewRecruits: goals.reduce((sum, g) => sum + (g.q1?.newRecruits || 0) + (g.q2?.newRecruits || 0) + (g.q3?.newRecruits || 0) + (g.q4?.newRecruits || 0), 0),
+    totalFYP: goals.reduce((sum, g) => sum + (g.annualFYP || 0), 0),
+    totalFYC: goals.reduce((sum, g) => sum + (g.annualFYC || 0), 0),
+    totalIncome: goals.reduce((sum, g) => sum + (g.annualIncome || 0), 0),
+  };
+  
+  const summaryRows = [
+    ['Total Manpower', totals.totalManpower.toString()],
+    ['Total New Recruits', totals.totalNewRecruits.toString()],
+    ['Total Annual FYP', `₱${totals.totalFYP.toLocaleString()}`],
+    ['Total Annual FYC', `₱${totals.totalFYC.toLocaleString()}`],
+    ['Total Annual Income', `₱${totals.totalIncome.toLocaleString()}`],
+  ];
+  
+  const colWidths = [100, 80];
+  let xPos = margin;
+  
+  doc.setFillColor(211, 17, 69);
+  doc.rect(xPos, yPos - 5, colWidths[0], 7, 'F');
+  doc.rect(xPos + colWidths[0], yPos - 5, colWidths[1], 7, 'F');
+  doc.setTextColor(255, 255, 255);
+  doc.setFont('helvetica', 'bold');
+  doc.text('Metric', xPos + 2, yPos);
+  doc.text('Total', xPos + colWidths[0] + 2, yPos);
+  yPos += 7;
+  
+  doc.setDrawColor(200, 200, 200);
+  doc.setTextColor(0, 0, 0);
+  doc.setFont('helvetica', 'normal');
+  
+  summaryRows.forEach((row) => {
+    checkPageBreak(8);
+    doc.rect(xPos, yPos - 5, colWidths[0], 7);
+    doc.rect(xPos + colWidths[0], yPos - 5, colWidths[1], 7);
+    doc.text(row[0], xPos + 2, yPos);
+    doc.text(row[1], xPos + colWidths[0] + 2, yPos);
+    yPos += 7;
+  });
+  
+  // Footer
+  const totalPages = doc.getNumberOfPages();
+  for (let i = 1; i <= totalPages; i++) {
+    doc.setPage(i);
+    doc.setFontSize(8);
+    doc.setTextColor(128, 128, 128);
+    doc.text(`Page ${i} of ${totalPages}`, pageWidth / 2, pageHeight - 10, { align: 'center' });
+  }
+  
+  const fileName = `Agency_Summary_${agencyName.replace(/\s+/g, '_')}_${Date.now()}.pdf`;
+  doc.save(fileName);
+}
+

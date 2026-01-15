@@ -21,12 +21,12 @@ const baseNavItems: NavItem[] = [
   { name: 'Agents Targets', href: '/agents-targets', icon: 'user-group' },
   { name: 'Comparison', href: '/comparison', icon: 'chart-bar' },
   { name: 'Strategic Planning', href: '/strategic-planning', icon: 'lightbulb' },
-  { name: 'Reports', href: '/reports', icon: 'file-contract' },
   { name: 'Settings', href: '/settings', icon: 'gear' },
 ];
 
 const adminNavItems: NavItem[] = [
   { name: 'User Management', href: '/admin/users', icon: 'users-cog' },
+  { name: 'Manage Units', href: '/admin/manage-units', icon: 'sitemap' },
   { name: 'Hierarchy Review', href: '/admin/hierarchy-review', icon: 'sitemap' },
   { name: 'Import Data', href: '/admin/import', icon: 'file-import' },
 ];
@@ -93,6 +93,24 @@ export function Sidebar() {
             </li>
           );
         })}
+        
+        {/* Reports - visible to ADMIN, ADD, SUM, UM */}
+        {user && (user.role === 'admin' || user.rank === 'ADMIN' || user.rank === 'ADD' || user.rank === 'SUM' || user.rank === 'UM') && (
+          <li>
+            <Link
+              href="/reports"
+              className={cn(
+                'flex items-center space-x-3 rounded-lg p-3 font-medium transition-all duration-200',
+                pathname === '/reports'
+                  ? 'bg-gradient-to-r from-red-600 to-red-700 font-semibold text-white shadow-lg'
+                  : 'text-gray-300 hover:bg-slate-700/50 hover:text-white'
+              )}
+            >
+              <i className="fa-solid fa-file-contract w-6 text-center text-lg"></i>
+              <span>Reports</span>
+            </Link>
+          </li>
+        )}
         
         {/* Admin-only navigation items */}
         {canAccessAdminPages(user) && (
