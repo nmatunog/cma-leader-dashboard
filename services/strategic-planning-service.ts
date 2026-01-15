@@ -526,3 +526,227 @@ export async function deleteAllGoals(): Promise<{ success: boolean; deleted: num
   }
 }
 
+// Delete all strategic planning goals for a specific agency
+export async function deleteAgencyGoals(agencyName: string): Promise<{ success: boolean; deleted: number; error?: string }> {
+  try {
+    if (!db) {
+      return { success: false, deleted: 0, error: 'Firestore is not initialized' };
+    }
+
+    const goalsQuery = query(
+      collection(db, GOALS_COLLECTION),
+      where('agencyName', '==', agencyName)
+    );
+    
+    const goalsSnapshot = await getDocs(goalsQuery);
+    
+    if (goalsSnapshot.empty) {
+      return { success: true, deleted: 0 };
+    }
+
+    // Delete in batches (Firestore batch limit is 500)
+    const batchSize = 500;
+    let deleted = 0;
+    const docs = goalsSnapshot.docs;
+
+    for (let i = 0; i < docs.length; i += batchSize) {
+      const batch = writeBatch(db);
+      const batchDocs = docs.slice(i, i + batchSize);
+      
+      batchDocs.forEach((docSnap) => {
+        batch.delete(docSnap.ref);
+      });
+      
+      await batch.commit();
+      deleted += batchDocs.length;
+    }
+
+    return { success: true, deleted };
+  } catch (error) {
+    console.error('Error deleting agency goals:', error);
+    return {
+      success: false,
+      deleted: 0,
+      error: error instanceof Error ? error.message : 'Failed to delete agency goals',
+    };
+  }
+}
+
+// Sync all goals' agency names from Users collection
+export async function syncAllGoalsAgencyFromUsers(): Promise<{ success: boolean; updated: number; skipped: number; errors: string[] }> {
+  try {
+    if (!db) {
+      return { success: false, updated: 0, skipped: 0, errors: ['Firestore is not initialized'] };
+    }
+
+    // Use dynamic imports to avoid circular dependencies
+    const userService = await import('@/lib/user-service');
+    const agencyNormalizer = await import('@/lib/utils/agency-name-normalizer');
+    const nameCanonicalizer = await import('@/lib/utils/name-canonicalizer');
+
+    const allUsers = await userService.getAllUsers();
+    const allGoals = await getAllGoals();
+
+    // Create user map for quick lookup
+    const userMap = new Map<string, { uid: string; agencyName: string; name: string }>();
+    allUsers.forEach(u => {
+      if (u.agencyName) {
+        userMap.set(u.uid, { uid: u.uid, agencyName: u.agencyName, name: u.name });
+      }
+    });
+
+    const batch = writeBatch(db);
+    let updated = 0;
+    let skipped = 0;
+    const errors: string[] = [];
+
+    for (const goal of allGoals) {
+      if (!goal.id) {
+        skipped++;
+        continue;
+      }
+
+      // Find matching user
+      let matchingUser = userMap.get(goal.userId);
+      
+      // If not found by UID, try flexible name matching
+      if (!matchingUser) {
+        const foundUser = allUsers.find(u => 
+          nameCanonicalizer.areNamesLikelySamePerson(u.name, goal.userName) && u.agencyName
+        );
+        if (foundUser) {
+          matchingUser = { uid: foundUser.uid, agencyName: foundUser.agencyName, name: foundUser.name };
+        }
+      }
+
+      if (!matchingUser) {
+        skipped++;
+        continue;
+      }
+
+      const canonicalAgency = agencyNormalizer.getCanonicalAgencyName(matchingUser.agencyName);
+      const goalCanonicalAgency = agencyNormalizer.getCanonicalAgencyName(goal.agencyName);
+
+      if (canonicalAgency !== goalCanonicalAgency) {
+        const goalRef = doc(db, GOALS_COLLECTION, goal.id);
+        batch.update(goalRef, {
+          agencyName: canonicalAgency,
+        });
+        updated++;
+      }
+    }
+
+    if (updated > 0) {
+      await batch.commit();
+    }
+
+    return { success: true, updated, skipped, errors };
+  } catch (error) {
+    console.error('Error syncing goals agency from users:', error);
+    return {
+      success: false,
+      updated: 0,
+      skipped: 0,
+      errors: [error instanceof Error ? error.message : 'Failed to sync goals agency from users'],
+    };
+  }
+}
+
+// Update goals agency for specific users
+export async function updateGoalsAgencyForUsers(userAgencyMap: Map<string, string>): Promise<{ success: boolean; updated: number; errors: string[] }> {
+  try {
+    if (!db) {
+      return { success: false, updated: 0, errors: ['Firestore is not initialized'] };
+    }
+
+    const { getCanonicalAgencyName } = await import('@/lib/utils/agency-name-normalizer');
+    const allGoals = await getAllGoals();
+
+    const batch = writeBatch(db);
+    let updated = 0;
+    const errors: string[] = [];
+
+    for (const goal of allGoals) {
+      if (!goal.id) continue;
+
+      const newAgency = userAgencyMap.get(goal.userId);
+      if (!newAgency) continue;
+
+      const canonicalAgency = getCanonicalAgencyName(newAgency);
+      const goalCanonicalAgency = getCanonicalAgencyName(goal.agencyName);
+
+      if (canonicalAgency !== goalCanonicalAgency) {
+        const goalRef = doc(db, GOALS_COLLECTION, goal.id);
+        batch.update(goalRef, {
+          agencyName: canonicalAgency,
+        });
+        updated++;
+      }
+    }
+
+    if (updated > 0) {
+      await batch.commit();
+    }
+
+    return { success: true, updated, errors };
+  } catch (error) {
+    console.error('Error updating goals agency for users:', error);
+    return {
+      success: false,
+      updated: 0,
+      errors: [error instanceof Error ? error.message : 'Failed to update goals agency for users'],
+    };
+  }
+}
+
+// Update goals agency for a single user
+export async function updateGoalsAgencyByUser(userId: string, newAgency: string): Promise<{ success: boolean; updated: number; error?: string }> {
+  try {
+    if (!db) {
+      return { success: false, updated: 0, error: 'Firestore is not initialized' };
+    }
+
+    const { getCanonicalAgencyName } = await import('@/lib/utils/agency-name-normalizer');
+    const canonicalAgency = getCanonicalAgencyName(newAgency);
+
+    const goalsQuery = query(
+      collection(db, GOALS_COLLECTION),
+      where('userId', '==', userId)
+    );
+    
+    const goalsSnapshot = await getDocs(goalsQuery);
+    
+    if (goalsSnapshot.empty) {
+      return { success: true, updated: 0 };
+    }
+
+    const batch = writeBatch(db);
+    let updated = 0;
+
+    goalsSnapshot.forEach((docSnap) => {
+      const goalData = docSnap.data();
+      const goalCanonicalAgency = getCanonicalAgencyName(goalData.agencyName);
+
+      if (canonicalAgency !== goalCanonicalAgency) {
+        batch.update(docSnap.ref, {
+          agencyName: canonicalAgency,
+        });
+        updated++;
+      }
+    });
+
+    if (updated > 0) {
+      await batch.commit();
+    }
+
+    return { success: true, updated };
+  } catch (error) {
+    console.error('Error updating goals agency by user:', error);
+    return {
+      success: false,
+      updated: 0,
+      error: error instanceof Error ? error.message : 'Failed to update goals agency by user',
+    };
+  }
+}
+
