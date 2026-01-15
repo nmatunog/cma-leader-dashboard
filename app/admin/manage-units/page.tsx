@@ -67,6 +67,7 @@ export default function ManageUnitsPage() {
   const [recalculatingFYP, setRecalculatingFYP] = useState(false);
   const [selectedUserForRecalc, setSelectedUserForRecalc] = useState<string>('');
   const [syncingGoals, setSyncingGoals] = useState(false);
+  const [dedupingGoals, setDedupingGoals] = useState(false);
 
   useEffect(() => {
     if (authLoading) return;
@@ -835,6 +836,67 @@ export default function ManageUnitsPage() {
     }
   };
 
+  const dedupeStrategicPlanningGoals = async () => {
+    if (!user) return;
+
+    const confirmed = window.confirm(
+      'This will remove duplicate Strategic Planning goal documents in Firestore (keeping the latest per user+agency).\n\nProceed?'
+    );
+    if (!confirmed) return;
+
+    try {
+      setDedupingGoals(true);
+      setError(null);
+      setSuccessMessage(null);
+
+      // Run a dry-run first to show impact
+      const dryRunRes = await fetch('/api/admin/dedupe-goals', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ dryRun: true, migrateIds: true }),
+      });
+
+      const dryRun = await dryRunRes.json();
+      if (!dryRunRes.ok || !dryRun?.success) {
+        throw new Error(dryRun?.error || 'Failed to run duplicate scan');
+      }
+
+      const confirmedAfterScan = window.confirm(
+        `Scan complete.\n\n` +
+          `Scanned: ${dryRun.scanned}\n` +
+          `Duplicate groups: ${dryRun.duplicateGroups}\n` +
+          `Duplicates to delete: ${dryRun.duplicatesToDelete}\n` +
+          `Keep docs to migrate to canonical IDs: ${dryRun.keepDocsToMigrate}\n\n` +
+          `Proceed with deletion?`
+      );
+      if (!confirmedAfterScan) return;
+
+      const res = await fetch('/api/admin/dedupe-goals', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ dryRun: false, migrateIds: true }),
+      });
+
+      const result = await res.json();
+      if (!res.ok || !result?.success) {
+        throw new Error(result?.error || 'Failed to deduplicate goals');
+      }
+
+      setSuccessMessage(
+        `✅ ${result.message}\n` +
+          `Scanned: ${result.scanned}, Duplicate groups: ${result.duplicateGroups}, Deleted: ${result.duplicatesToDelete}.`
+      );
+
+      // Reload data so the UI reflects the deduped goals
+      await loadData();
+    } catch (err) {
+      console.error('Error deduplicating goals:', err);
+      setError(err instanceof Error ? err.message : 'Failed to deduplicate goals');
+    } finally {
+      setDedupingGoals(false);
+    }
+  };
+
   if (authLoading || loading) {
     return (
       <div className="flex h-screen bg-slate-50">
@@ -894,7 +956,7 @@ export default function ManageUnitsPage() {
                   ⚠️ Important: This will update all goals in the database. Make sure you have made all necessary corrections in User Management before running this sync.
                 </p>
               </div>
-              <div className="flex items-center gap-4">
+              <div className="flex items-center gap-4 flex-wrap">
                 <button
                   onClick={syncAllGoalsWithUsers}
                   disabled={syncingGoals || loading}
@@ -909,6 +971,25 @@ export default function ManageUnitsPage() {
                     <>
                       <span>🔄</span>
                       <span>Sync All Goals with Users Collection</span>
+                    </>
+                  )}
+                </button>
+
+                <button
+                  onClick={dedupeStrategicPlanningGoals}
+                  disabled={dedupingGoals || loading}
+                  className="px-6 py-2 bg-white border-2 border-amber-300 text-amber-900 rounded-lg hover:bg-amber-50 transition-colors font-semibold disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2 whitespace-nowrap shadow-sm"
+                  title="Remove duplicate goal documents (keeps latest per user+agency)"
+                >
+                  {dedupingGoals ? (
+                    <>
+                      <div className="inline-block animate-spin rounded-full h-4 w-4 border-b-2 border-amber-700"></div>
+                      <span>Deduping...</span>
+                    </>
+                  ) : (
+                    <>
+                      <span>🧹</span>
+                      <span>Deduplicate Goal Docs</span>
                     </>
                   )}
                 </button>
