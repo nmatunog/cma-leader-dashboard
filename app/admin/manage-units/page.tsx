@@ -7,10 +7,9 @@ import { useAuth } from '@/contexts/auth-context';
 import { canAccessAdminPages } from '@/lib/permissions';
 import { getAllUsers, updateUser, getUsersByAgency, getUsersByUnitManager } from '@/lib/user-service';
 import { getAllGoals, type StrategicPlanningGoal } from '@/services/strategic-planning-service';
-import { getCanonicalName } from '@/lib/utils/name-canonicalizer';
+import { getCanonicalName, areNamesLikelySamePerson, getComparablePersonKey } from '@/lib/utils/name-canonicalizer';
 import { getCanonicalAgencyName } from '@/lib/utils/agency-name-normalizer';
 import { formatDisplayName } from '@/lib/utils/name-formatter';
-import { areNamesLikelySamePerson } from '@/lib/utils/name-canonicalizer';
 import { writeBatch, doc, collection, query, where, getDocs, updateDoc, serverTimestamp } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
 import type { User } from '@/types/user';
@@ -697,11 +696,18 @@ export default function ManageUnitsPage() {
       
       // Create a map of users by canonical name for quick lookup
       const userMap = new Map<string, User>();
+      const userByPersonKey = new Map<string, User>();
       users.forEach(u => {
         const canonicalName = getCanonicalName(u.name);
         userMap.set(canonicalName, u);
         // Also store with original name
         userMap.set(u.name, u);
+
+        // Also store by strict person-key (fast match across middle-name/initial variations)
+        const personKey = getComparablePersonKey(u.name);
+        if (personKey) {
+          userByPersonKey.set(personKey, u);
+        }
       });
       
       // Process goals in batches (Firestore batch limit is 500)
@@ -726,11 +732,18 @@ export default function ManageUnitsPage() {
           const canonicalGoalName = getCanonicalName(goal.userName);
           let matchingUser = userMap.get(canonicalGoalName) || userMap.get(goal.userName);
           
-          // If not found, try flexible name matching
+          // If not found, try person-key match (fast), then fall back to flexible name matching
           if (!matchingUser) {
-            matchingUser = users.find(u => 
-              areNamesLikelySamePerson(u.name, goal.userName)
-            ) || undefined;
+            const goalPersonKey = getComparablePersonKey(goal.userName);
+            if (goalPersonKey) {
+              matchingUser = userByPersonKey.get(goalPersonKey);
+            }
+
+            if (!matchingUser) {
+              matchingUser = users.find(u => 
+                areNamesLikelySamePerson(u.name, goal.userName)
+              ) || undefined;
+            }
           }
           
           if (!matchingUser) {

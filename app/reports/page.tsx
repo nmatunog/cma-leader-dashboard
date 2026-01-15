@@ -1,13 +1,13 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useMemo, useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { Sidebar } from '@/components/sidebar';
 import { getAllGoals, getAgencyGoals, getGoalsForSUM, getGoalsForADD, getUnitGoals, type StrategicPlanningGoal } from '@/services/strategic-planning-service';
 import { formatNumberWithCommas } from '@/components/strategic-planning/utils/number-format';
 import { getCanonicalAgencyName, areAgencyNamesEqual } from '@/lib/utils/agency-name-normalizer';
 import { formatDisplayName } from '@/lib/utils/name-formatter';
-import { getCanonicalName, areNamesLikelySamePerson } from '@/lib/utils/name-canonicalizer';
+import { getCanonicalName, areNamesLikelySamePerson, getComparablePersonKey } from '@/lib/utils/name-canonicalizer';
 import { getAllUsers, getSUMsInAgencyFromUsers, getUMsUnderSUMFromUsers, getUMsUnderADDFromUsers, getUnitsByAgencyFromUsers } from '@/lib/user-service';
 import type { User } from '@/types/user';
 import { useAuth } from '@/contexts/auth-context';
@@ -118,6 +118,38 @@ export default function ReportsPage() {
   const [showSummaryByUnit, setShowSummaryByUnit] = useState<boolean>(false); // Track Summary by Unit section visibility
   const [expandedUnitManagers, setExpandedUnitManagers] = useState<Set<string>>(new Set()); // Track expanded unit managers for individual reports
   
+  // ---- Perf: memoized lookups to avoid repeated O(n) scans + repeated canonicalization ----
+  const goalsByCanonicalUserName = useMemo(() => {
+    const m = new Map<string, StrategicPlanningGoal>();
+    goals.forEach(g => {
+      m.set(getCanonicalName(g.userName), g);
+    });
+    return m;
+  }, [goals]);
+
+  const usersPersonKeyToAgency = useMemo(() => {
+    const m = new Map<string, string>();
+    allUsersList.forEach(u => {
+      const key = getComparablePersonKey(u.name);
+      if (!key) return;
+      if (!u.agencyName) return;
+      // Users collection is source of truth; store canonical agency
+      m.set(key, getCanonicalAgencyName(u.agencyName));
+    });
+    return m;
+  }, [allUsersList]);
+
+  const usersPersonKeyToUnitManager = useMemo(() => {
+    const m = new Map<string, string>();
+    allUsersList.forEach(u => {
+      const key = getComparablePersonKey(u.name);
+      if (!key) return;
+      if (!u.unitManager) return;
+      m.set(key, getCanonicalName(u.unitManager));
+    });
+    return m;
+  }, [allUsersList]);
+
   // Helper functions for accordion state
   const toggleAgency = (agencyName: string) => {
     setExpandedAgencies(prev => {
@@ -550,16 +582,16 @@ export default function ReportsPage() {
               }
             }
             
-            // Get all ADDs in agency (from userRankMap)
+            // Get all ADDs in agency (from userRankMap + userAgencyMap; avoid scanning goals)
             const addNames: string[] = [];
             userRankMap.forEach((rank, userName) => {
               if (rank === 'ADD') {
-                // Check if this ADD is in this agency (by checking if they have goals in this agency)
-                const hasGoalsInAgency = goals.some(g => 
-                  getCanonicalAgencyName(g.agencyName) === getCanonicalAgencyName(agency) && 
-                  g.userName === userName
-                );
-                if (hasGoalsInAgency) {
+                const canonicalUserName = getCanonicalName(userName);
+                const addAgency =
+                  userAgencyMap.get(canonicalUserName) ||
+                  userAgencyMap.get(userName);
+                if (!addAgency) return;
+                if (getCanonicalAgencyName(addAgency) === getCanonicalAgencyName(agency)) {
                   addNames.push(userName);
                 }
               }
@@ -604,7 +636,7 @@ export default function ReportsPage() {
   }, [goals, userRankMap]);
 
   useEffect(() => {
-    // Wait for both userRankMap and userAgencyMap to be loaded before calculating aggregates
+    // Wait for source-of-truth maps before calculating aggregates
     if (goals.length > 0 && userRankMap.size > 0 && userAgencyMap.size > 0) {
       calculateAggregates();
     }
@@ -746,60 +778,75 @@ export default function ReportsPage() {
   };
 
   // Filter goals to only include those with valid agency names from Users collection
-  // This must be defined before calculateAggregates uses it
-  const validGoals = goals.filter(goal => {
-    if (!goal.agencyName || validAgencyNames.size === 0) return false;
-    const canonicalAgencyName = getCanonicalAgencyName(goal.agencyName);
-    // Only include goals if their agency name (canonicalized) exists in Users collection
-    return validAgencyNames.has(canonicalAgencyName);
-  });
+  // Memoized to avoid recomputing + repeated canonicalization on every render.
+  const validGoals = useMemo(() => {
+    if (!validAgencyNames.size) return [];
+    const agencyCache = new Map<string, string>();
+    const canonAgency = (name: string) => {
+      const cached = agencyCache.get(name);
+      if (cached) return cached;
+      const canon = getCanonicalAgencyName(name);
+      agencyCache.set(name, canon);
+      return canon;
+    };
+    return goals.filter(goal => {
+      if (!goal.agencyName) return false;
+      return validAgencyNames.has(canonAgency(goal.agencyName));
+    });
+  }, [goals, validAgencyNames]);
 
-  const calculateAggregates = async () => {
-    // First filter by valid agency names, then apply other filters
-    const validFiltered = validGoals.filter(goal => {
+  // Single source of truth for client-side filtered dataset (used by UI + aggregates).
+  // This replaces multiple duplicated filter pipelines and avoids O(n^2) goal lookups.
+  const filteredGoals = useMemo(() => {
+    const filtered = validGoals.filter(goal => {
       if (filterAgency !== 'all' && goal.agencyName !== filterAgency) return false;
       if (filterRank !== 'all' && goal.userRank !== filterRank) return false;
+
       if (filterSUM !== 'all') {
-        // Filter by SUM: include goals where:
-        // 1. Goal is from the SUM itself (verify from user records)
-        const goalUserRank = userRankMap.get(goal.userName) || goal.userRank;
-        if (goalUserRank === 'SUM' && goal.userName === filterSUM) {
-          // SUM's own goal - include
-        } else if (goalUserRank === 'UM') {
-          // 2. Goal is from a UM that reports to this SUM
-          // Check if this UM reports to the selected SUM
-          const umsUnderSUM = sumToUMsMap.get(filterSUM) || [];
-          // Also check if goal.unitManager equals filterSUM (in case it's set correctly)
-          if (!umsUnderSUM.includes(goal.userName) && goal.unitManager !== filterSUM) {
-            return false;
-          }
-        } else {
-          // 3. Goal is from an advisor or other role
-          // Check if advisor reports directly to SUM (verify SUM from user records)
-          const unitManagerRank = userRankMap.get(goal.unitManager || '');
-          if (unitManagerRank === 'SUM' && goal.unitManager === filterSUM) {
-            // Direct advisor under SUM - include
-          } else {
-            // Check if their UM reports to this SUM
-            const umsUnderSUM = sumToUMsMap.get(filterSUM) || [];
-            if (!umsUnderSUM.includes(goal.unitManager)) {
-              // Also check if UM goal exists and has unitManager set to SUM (verify from user records)
-              const umGoal = goals.find(g => g.userName === goal.unitManager);
-              const umGoalUserRank = umGoal ? (userRankMap.get(umGoal.userName) || umGoal.userRank) : null;
-              if (!umGoal || !umGoalUserRank || (umGoal.unitManager !== filterSUM && !umsUnderSUM.includes(umGoal.userName))) {
-                return false;
-              }
-            }
-          }
+        // Verify ranks from Users collection when available (source of truth)
+        const goalUserRank = userRankMap.get(getCanonicalName(goal.userName)) || userRankMap.get(goal.userName) || goal.userRank;
+
+        // SUM's own goal
+        if (goalUserRank === 'SUM') {
+          return goal.userName === filterSUM;
         }
+
+        const umsUnderSUM = sumToUMsMap.get(filterSUM) || [];
+
+        if (goalUserRank === 'UM') {
+          // UM must be under selected SUM (or explicit unitManager equals SUM)
+          return umsUnderSUM.includes(goal.userName) || goal.unitManager === filterSUM;
+        }
+
+        // Advisor/other: either direct under SUM, or under a UM that reports to selected SUM
+        const unitManagerRank = userRankMap.get(getCanonicalName(goal.unitManager || '')) || userRankMap.get(goal.unitManager || '');
+        if (unitManagerRank === 'SUM' && goal.unitManager === filterSUM) {
+          return true;
+        }
+
+        // If unitManager is a UM, check it's under SUM
+        if (umsUnderSUM.includes(goal.unitManager)) return true;
+
+        // Fallback: check the UM's goal record (no linear scan)
+        const umGoal = goalsByCanonicalUserName.get(getCanonicalName(goal.unitManager || ''));
+        const umGoalRank = umGoal ? (userRankMap.get(getCanonicalName(umGoal.userName)) || userRankMap.get(umGoal.userName) || umGoal.userRank) : null;
+        if (!umGoal || !umGoalRank) return false;
+        return umGoal.unitManager === filterSUM || umsUnderSUM.includes(umGoal.userName);
       }
+
       if (filterUnit !== 'all') {
         const goalUnitName = goal.unitName || `${goal.unitManager}_${goal.agencyName}`;
-        if (goalUnitName !== filterUnit) return false;
+        return goalUnitName === filterUnit;
       }
+
       return true;
     });
-    const filtered = validFiltered;
+
+    return filtered;
+  }, [validGoals, filterAgency, filterRank, filterSUM, filterUnit, userRankMap, sumToUMsMap, goalsByCanonicalUserName]);
+
+  const calculateAggregates = () => {
+    const filtered = filteredGoals;
 
     const agg: AggregatedData = {
       totalUsers: filtered.length,
@@ -827,6 +874,81 @@ export default function ReportsPage() {
     // IMPORTANT: Use Users collection as source of truth for agency assignments, not goal.agencyName
     const unitGroups: Record<string, StrategicPlanningGoal[]> = {};
     const canonicalUnitKeyToUnitName = new Map<string, string>();
+    const unitKeyByLeaderPersonKey = new Map<string, string>(); // "FIRST[ FIRST2]|LAST" -> unitKey
+
+    // Local caches for the duration of this computation
+    const agencyLookupCache = new Map<string, string>();
+    const unitManagerLookupCache = new Map<string, string>();
+    const canonAgencyCache = new Map<string, string>();
+    const canonAgency = (name: string) => {
+      const cached = canonAgencyCache.get(name);
+      if (cached) return cached;
+      const canon = getCanonicalAgencyName(name);
+      canonAgencyCache.set(name, canon);
+      return canon;
+    };
+
+    const getAgencyForName = (name: string, fallbackAgency: string): string => {
+      const cacheKey = `${name}|${fallbackAgency}`;
+      const cached = agencyLookupCache.get(cacheKey);
+      if (cached) return cached;
+
+      const canonicalName = getCanonicalName(name);
+      const byCanonical = userAgencyMap.get(canonicalName);
+      if (byCanonical) {
+        agencyLookupCache.set(cacheKey, byCanonical);
+        return byCanonical;
+      }
+      const byOriginal = userAgencyMap.get(name);
+      if (byOriginal) {
+        agencyLookupCache.set(cacheKey, byOriginal);
+        return byOriginal;
+      }
+
+      const personKey = getComparablePersonKey(name);
+      if (personKey) {
+        const agencyFromUsers = usersPersonKeyToAgency.get(personKey);
+        if (agencyFromUsers) {
+          agencyLookupCache.set(cacheKey, agencyFromUsers);
+          return agencyFromUsers;
+        }
+      }
+
+      const fallback = canonAgency(fallbackAgency);
+      agencyLookupCache.set(cacheKey, fallback);
+      return fallback;
+    };
+
+    const getUnitManagerForUser = (userName: string, fallbackUnitManager: string | undefined): string => {
+      const cacheKey = `${userName}|${fallbackUnitManager || ''}`;
+      const cached = unitManagerLookupCache.get(cacheKey);
+      if (cached) return cached;
+
+      const canonicalUser = getCanonicalName(userName);
+      const byCanonical = userUnitManagerMap.get(canonicalUser);
+      if (byCanonical) {
+        unitManagerLookupCache.set(cacheKey, byCanonical);
+        return byCanonical;
+      }
+      const byOriginal = userUnitManagerMap.get(userName);
+      if (byOriginal) {
+        unitManagerLookupCache.set(cacheKey, byOriginal);
+        return byOriginal;
+      }
+
+      const personKey = getComparablePersonKey(userName);
+      if (personKey) {
+        const umFromUsers = usersPersonKeyToUnitManager.get(personKey);
+        if (umFromUsers) {
+          unitManagerLookupCache.set(cacheKey, umFromUsers);
+          return umFromUsers;
+        }
+      }
+
+      const fallback = fallbackUnitManager ? getCanonicalName(fallbackUnitManager) : 'UNKNOWN';
+      unitManagerLookupCache.set(cacheKey, fallback);
+      return fallback;
+    };
     
       // STEP 1A: First pass - identify all leaders (UM/SUM/ADD) and create unit groups for them
       // Leaders always create their own unit group under their own name
@@ -836,76 +958,28 @@ export default function ReportsPage() {
         
         if (isLeader) {
           const canonicalManager = getCanonicalName(goal.userName);
-          
-          // FIRST: Check if there's already a unit group for a similar name (regardless of agency)
-          // This prevents duplicates when the same person has goals with different agency names
-          let existingUnitKey: string | null = null;
-          let goalOwnerAgency: string | null = null;
-          
-          for (const [unitKey, unitGoalList] of Object.entries(unitGroups)) {
-            // Check if any leader in this unit has a similar name
-            const similarLeader = unitGoalList.find(g => {
-              const isUnitLeader = g.userRank === 'UM' || g.userRank === 'SUM' || g.userRank === 'ADD';
-              if (!isUnitLeader) return false;
-              // Use flexible name matching to handle middle initial variations
-              return areNamesLikelySamePerson(g.userName, goal.userName);
-            });
-            
-            if (similarLeader) {
-              // Found a similar leader - verify they're actually the same person
-              // Double-check using areNamesLikelySamePerson to ensure ALL first names match
-              // This prevents "Maria Rosario" from being grouped with "Maria Estrella"
-              if (areNamesLikelySamePerson(similarLeader.userName, goal.userName)) {
-                // Confirmed same person - use their unit key and agency (from Users collection)
-                existingUnitKey = unitKey;
-                // Extract agency from existing unit key (source of truth)
-                goalOwnerAgency = unitKey.split('_').slice(1).join('_');
-                break;
-              }
-              // If names don't match (e.g., "Maria Rosario" vs "Maria Estrella"), continue searching
-            }
-          }
-          
-          // If no existing unit found, get agency from Users collection (source of truth)
-          if (!existingUnitKey) {
-            const canonicalGoalOwner = getCanonicalName(goal.userName);
-            goalOwnerAgency = userAgencyMap.get(canonicalGoalOwner) || null;
-            if (!goalOwnerAgency) {
-              // Try with original userName (not canonicalized)
-              goalOwnerAgency = userAgencyMap.get(goal.userName) || null;
-            }
-            if (!goalOwnerAgency) {
-              // Try flexible name matching
-              const matchingUser = allUsersList.find(u => 
-                areNamesLikelySamePerson(u.name, goal.userName)
-              );
-              if (matchingUser && matchingUser.agencyName) {
-                goalOwnerAgency = getCanonicalAgencyName(matchingUser.agencyName);
-                // Cache this match
-                userAgencyMap.set(canonicalGoalOwner, goalOwnerAgency);
-                userAgencyMap.set(goal.userName, goalOwnerAgency);
-              } else {
-                // Fallback to goal's agencyName
-                goalOwnerAgency = getCanonicalAgencyName(goal.agencyName);
-                console.warn(`[ReportsPage] Agency not found in Users collection for leader ${canonicalGoalOwner}, using fallback: ${goalOwnerAgency}`);
-              }
-            }
-          }
-          
-          // Create canonical unit key with the agency (either from existing unit or looked up)
-          const canonicalUnitKey = `${canonicalManager}_${goalOwnerAgency}`;
-          
+
+          // Fast path: use person-key map to consolidate the same person without scanning all units
+          const personKey = getComparablePersonKey(goal.userName);
+          const existingUnitKey = personKey ? unitKeyByLeaderPersonKey.get(personKey) : null;
+
           if (existingUnitKey) {
-            // Add to existing unit group (consolidate similar names)
-            // Always use the existing unit key to ensure consistency
             unitGroups[existingUnitKey].push(goal);
-          } else {
-            // Create new unit group for this leader
-            if (!unitGroups[canonicalUnitKey]) {
-              unitGroups[canonicalUnitKey] = [];
-              canonicalUnitKeyToUnitName.set(canonicalUnitKey, goal.unitName || canonicalUnitKey);
-            }
-            unitGroups[canonicalUnitKey].push(goal);
+            return;
+          }
+
+          // Agency from Users collection (source of truth) with safe fallback
+          const goalOwnerAgency = getAgencyForName(goal.userName, goal.agencyName);
+          const canonicalUnitKey = `${canonicalManager}_${goalOwnerAgency}`;
+
+          if (!unitGroups[canonicalUnitKey]) {
+            unitGroups[canonicalUnitKey] = [];
+            canonicalUnitKeyToUnitName.set(canonicalUnitKey, goal.unitName || canonicalUnitKey);
+          }
+          unitGroups[canonicalUnitKey].push(goal);
+
+          if (personKey) {
+            unitKeyByLeaderPersonKey.set(personKey, canonicalUnitKey);
           }
         }
       });
@@ -918,49 +992,12 @@ export default function ReportsPage() {
       if (!isLeader) {
         // For advisors, get unit manager from Users collection (source of truth)
         // Override goal.unitManager with the current assignment from Users collection
-        const canonicalGoalOwner = getCanonicalName(goal.userName);
-        let advisorUnitManager: string = userUnitManagerMap.get(canonicalGoalOwner) || '';
-        if (!advisorUnitManager) {
-          // Try with original userName (not canonicalized)
-          advisorUnitManager = userUnitManagerMap.get(goal.userName) || '';
-        }
-        if (!advisorUnitManager) {
-          // Try flexible name matching
-          const matchingUser = allUsersList.find(u => 
-            areNamesLikelySamePerson(u.name, goal.userName)
-          );
-          if (matchingUser && matchingUser.unitManager) {
-            advisorUnitManager = getCanonicalName(matchingUser.unitManager);
-            // Cache this match
-            userUnitManagerMap.set(canonicalGoalOwner, advisorUnitManager);
-            userUnitManagerMap.set(goal.userName, advisorUnitManager);
-          } else {
-            // Fallback to goal's unitManager (for backward compatibility)
-            advisorUnitManager = goal.unitManager || 'Unknown';
-            console.warn(`[ReportsPage] Unit manager not found in Users collection for advisor ${goal.userName}, using goal's unitManager: ${advisorUnitManager}`);
-          }
-        }
+        const advisorUnitManager = getUnitManagerForUser(goal.userName, goal.unitManager || undefined);
         const canonicalUnitManager = getCanonicalName(advisorUnitManager);
-        
-        // Try to find a unit group for this unit manager
-        // Look through all existing unit groups to find one where the leader matches
-        let foundUnitKey: string | null = null;
-        
-        for (const [unitKey, unitGoalList] of Object.entries(unitGroups)) {
-          // Check if any leader in this unit matches the advisor's unitManager
-          // Use areNamesLikelySamePerson to handle middle initial variations (e.g., "JESSICA BACULAN" vs "JESSICA G. BACULAN")
-          const leaderInUnit = unitGoalList.find(g => {
-            const isUnitLeader = g.userRank === 'UM' || g.userRank === 'SUM' || g.userRank === 'ADD';
-            if (!isUnitLeader) return false;
-            // Use flexible name matching to handle middle initial variations
-            return areNamesLikelySamePerson(g.userName, advisorUnitManager);
-          });
-          
-          if (leaderInUnit) {
-            foundUnitKey = unitKey;
-            break;
-          }
-        }
+
+        // Fast path: person-key lookup instead of scanning all units
+        const managerPersonKey = getComparablePersonKey(advisorUnitManager) || getComparablePersonKey(canonicalUnitManager);
+        const foundUnitKey = managerPersonKey ? (unitKeyByLeaderPersonKey.get(managerPersonKey) || null) : null;
         
         // If we found a matching unit, add the advisor to it
         if (foundUnitKey) {
@@ -970,36 +1007,7 @@ export default function ReportsPage() {
           // This handles cases where the unit manager hasn't submitted a goal yet
           // Get agency from Users collection
           // Try exact match first, then flexible name matching
-          let canonicalAgency: string;
-          let unitManagerAgency = userAgencyMap.get(canonicalUnitManager);
-          if (!unitManagerAgency) {
-            // Try with original unitManager name (not canonicalized)
-            unitManagerAgency = userAgencyMap.get(advisorUnitManager);
-          }
-          if (!unitManagerAgency) {
-            // Try flexible name matching - look through all users to find a similar name
-            const matchingUser = allUsersList.find(u => 
-              areNamesLikelySamePerson(u.name, advisorUnitManager)
-            );
-            if (matchingUser && matchingUser.agencyName) {
-              unitManagerAgency = getCanonicalAgencyName(matchingUser.agencyName);
-              // Cache this match for future lookups
-              userAgencyMap.set(canonicalUnitManager, unitManagerAgency);
-              userAgencyMap.set(advisorUnitManager, unitManagerAgency);
-            }
-          }
-          if (unitManagerAgency) {
-            canonicalAgency = unitManagerAgency;
-          } else {
-            // Fallback: Try advisor's own agency, then goal's agencyName
-            const canonicalGoalOwner = getCanonicalName(goal.userName);
-            let goalOwnerAgency = userAgencyMap.get(canonicalGoalOwner);
-            if (!goalOwnerAgency) {
-              goalOwnerAgency = userAgencyMap.get(goal.userName);
-            }
-            canonicalAgency = goalOwnerAgency || getCanonicalAgencyName(goal.agencyName);
-            console.warn(`[ReportsPage] Unit manager "${canonicalUnitManager}" not found in Users collection for advisor ${goal.userName}, using fallback agency: ${canonicalAgency}`);
-          }
+          const canonicalAgency = getAgencyForName(advisorUnitManager, goal.agencyName);
           
           const canonicalUnitKey = `${canonicalUnitManager}_${canonicalAgency}`;
           
@@ -1008,6 +1016,11 @@ export default function ReportsPage() {
             canonicalUnitKeyToUnitName.set(canonicalUnitKey, goal.unitName || canonicalUnitKey);
           }
           unitGroups[canonicalUnitKey].push(goal);
+
+          // If we created this group due to missing leader submission, register it for subsequent advisors
+          if (managerPersonKey) {
+            unitKeyByLeaderPersonKey.set(managerPersonKey, canonicalUnitKey);
+          }
         }
       }
     });
@@ -1221,73 +1234,47 @@ export default function ReportsPage() {
       };
     });
 
-    // STEP 2.5: Consolidate duplicate units (merge units with similar manager names in same agency)
-    // This is a safety net to catch any duplicates that weren't caught in the grouping step
-    // IMPORTANT: Only consolidate if names are truly the same person (all first names match)
+    // STEP 2.5: Consolidate duplicate units in O(n) using person-key + agency key.
+    // This is a safety net for any remaining duplicates due to name/agency variations.
     const consolidatedByUnit: typeof agg.byUnit = {};
-    const unitKeysProcessed = new Set<string>();
-    
+    const mergeKeyToTargetUnitKey = new Map<string, string>();
+
     Object.entries(agg.byUnit).forEach(([unitKey, unitData]) => {
-      // Skip if already processed (merged into another unit)
-      if (unitKeysProcessed.has(unitKey)) {
+      const managerKey = getComparablePersonKey(unitData.unitManager) || getCanonicalName(unitData.unitManager);
+      const agencyKey = getCanonicalAgencyName(unitData.agencyName);
+      const mergeKey = `${managerKey}|${agencyKey}`;
+
+      const targetKey = mergeKeyToTargetUnitKey.get(mergeKey);
+      if (!targetKey) {
+        mergeKeyToTargetUnitKey.set(mergeKey, unitKey);
+        consolidatedByUnit[unitKey] = unitData;
         return;
       }
-      
-      // Check if there's another unit with a similar manager name in the same agency
-      // IMPORTANT: Use areNamesLikelySamePerson which now requires ALL first names to match
-      // This prevents "Maria Rosario" from being merged with "Maria Estrella"
-      let targetUnitKey = unitKey;
-      let targetUnitData = unitData;
-      
-      // Look for similar units to merge
-      Object.entries(agg.byUnit).forEach(([otherUnitKey, otherUnitData]) => {
-        if (otherUnitKey === unitKey || unitKeysProcessed.has(otherUnitKey)) {
-          return;
-        }
-        
-        // Check if same agency and similar manager names
-        const sameAgency = getCanonicalAgencyName(unitData.agencyName) === getCanonicalAgencyName(otherUnitData.agencyName);
-        const similarNames = areNamesLikelySamePerson(unitData.unitManager, otherUnitData.unitManager);
-        
-        if (sameAgency && similarNames) {
-          // Merge the other unit into this one
-          console.log(`[ReportsPage] Consolidating duplicate units: "${otherUnitKey}" into "${targetUnitKey}"`);
-          
-          // Merge the data (sum all values)
-          targetUnitData = {
-            ...targetUnitData,
-            count: targetUnitData.count + otherUnitData.count,
-            beginningManpowerBase: targetUnitData.beginningManpowerBase + otherUnitData.beginningManpowerBase,
-            endManpower: targetUnitData.endManpower + otherUnitData.endManpower,
-            newRecruits: targetUnitData.newRecruits + otherUnitData.newRecruits,
-            fyp: targetUnitData.fyp + otherUnitData.fyp,
-            fyc: targetUnitData.fyc + otherUnitData.fyc,
-            income: targetUnitData.income + otherUnitData.income,
-            // Merge reconciliation breakdown (use max for team targets, sum for others)
-            leaderPersonalFYP: (targetUnitData.leaderPersonalFYP || 0) + (otherUnitData.leaderPersonalFYP || 0),
-            leaderPersonalFYC: (targetUnitData.leaderPersonalFYC || 0) + (otherUnitData.leaderPersonalFYC || 0),
-            leaderPersonalCases: (targetUnitData.leaderPersonalCases || 0) + (otherUnitData.leaderPersonalCases || 0),
-            leaderPersonalRecruits: (targetUnitData.leaderPersonalRecruits || 0) + (otherUnitData.leaderPersonalRecruits || 0),
-            leaderTeamFYP: Math.max(targetUnitData.leaderTeamFYP || 0, otherUnitData.leaderTeamFYP || 0),
-            leaderTeamFYC: Math.max(targetUnitData.leaderTeamFYC || 0, otherUnitData.leaderTeamFYC || 0),
-            advisorSumFYP: (targetUnitData.advisorSumFYP || 0) + (otherUnitData.advisorSumFYP || 0),
-            advisorSumFYC: (targetUnitData.advisorSumFYC || 0) + (otherUnitData.advisorSumFYC || 0),
-            advisorSumCases: (targetUnitData.advisorSumCases || 0) + (otherUnitData.advisorSumCases || 0),
-            advisorSumRecruits: (targetUnitData.advisorSumRecruits || 0) + (otherUnitData.advisorSumRecruits || 0),
-            reconciliationMethod: targetUnitData.reconciliationMethod || otherUnitData.reconciliationMethod,
-          };
-          
-          // Mark the other unit as processed
-          unitKeysProcessed.add(otherUnitKey);
-        }
-      });
-      
-      // Add the (possibly merged) unit to consolidated results
-      consolidatedByUnit[targetUnitKey] = targetUnitData;
-      unitKeysProcessed.add(unitKey);
+
+      const targetUnitData = consolidatedByUnit[targetKey];
+      consolidatedByUnit[targetKey] = {
+        ...targetUnitData,
+        count: targetUnitData.count + unitData.count,
+        beginningManpowerBase: targetUnitData.beginningManpowerBase + unitData.beginningManpowerBase,
+        endManpower: targetUnitData.endManpower + unitData.endManpower,
+        newRecruits: targetUnitData.newRecruits + unitData.newRecruits,
+        fyp: targetUnitData.fyp + unitData.fyp,
+        fyc: targetUnitData.fyc + unitData.fyc,
+        income: targetUnitData.income + unitData.income,
+        leaderPersonalFYP: (targetUnitData.leaderPersonalFYP || 0) + (unitData.leaderPersonalFYP || 0),
+        leaderPersonalFYC: (targetUnitData.leaderPersonalFYC || 0) + (unitData.leaderPersonalFYC || 0),
+        leaderPersonalCases: (targetUnitData.leaderPersonalCases || 0) + (unitData.leaderPersonalCases || 0),
+        leaderPersonalRecruits: (targetUnitData.leaderPersonalRecruits || 0) + (unitData.leaderPersonalRecruits || 0),
+        leaderTeamFYP: Math.max(targetUnitData.leaderTeamFYP || 0, unitData.leaderTeamFYP || 0),
+        leaderTeamFYC: Math.max(targetUnitData.leaderTeamFYC || 0, unitData.leaderTeamFYC || 0),
+        advisorSumFYP: (targetUnitData.advisorSumFYP || 0) + (unitData.advisorSumFYP || 0),
+        advisorSumFYC: (targetUnitData.advisorSumFYC || 0) + (unitData.advisorSumFYC || 0),
+        advisorSumCases: (targetUnitData.advisorSumCases || 0) + (unitData.advisorSumCases || 0),
+        advisorSumRecruits: (targetUnitData.advisorSumRecruits || 0) + (unitData.advisorSumRecruits || 0),
+        reconciliationMethod: targetUnitData.reconciliationMethod || unitData.reconciliationMethod,
+      };
     });
-    
-    // Replace agg.byUnit with consolidated version
+
     agg.byUnit = consolidatedByUnit;
 
     // STEP 3: Calculate SUM totals from unit totals (SUM-level consolidation)
@@ -1454,38 +1441,7 @@ export default function ReportsPage() {
     setAggregated(agg);
   };
 
-  // Use validGoals (filtered by valid agency names) instead of all goals, then apply additional filters
-  const filteredGoals = validGoals.filter(goal => {
-    if (filterAgency !== 'all' && goal.agencyName !== filterAgency) return false;
-    if (filterRank !== 'all' && goal.userRank !== filterRank) return false;
-    if (filterSUM !== 'all') {
-      // Filter by SUM: include goals where:
-      // 1. Goal is from a UM that reports to this SUM (unitManager === filterSUM for UMs)
-      // 2. Goal is from an advisor under a UM that reports to this SUM
-      // 3. Goal is from a direct advisor under this SUM (unitManager === filterSUM for advisors)
-      if (goal.userRank === 'UM' && goal.unitManager !== filterSUM) return false;
-      if (goal.userRank === 'ADV' || goal.userRank === 'AUM') {
-        // For advisors, check if their UM reports to this SUM, or if they report directly to SUM
-        if (goal.unitManager === filterSUM) {
-          // Direct advisor under SUM - include
-        } else {
-          // Check if their UM reports to this SUM
-          const umGoal = goals.find(g => g.userName === goal.unitManager && g.userRank === 'UM');
-          if (!umGoal || umGoal.unitManager !== filterSUM) {
-            return false;
-          }
-        }
-      }
-      // Verify SUM from user records, not goal.userRank
-      const goalUserRank = userRankMap.get(goal.userName) || goal.userRank;
-      if (goalUserRank === 'SUM' && goal.userName !== filterSUM) return false;
-    }
-    if (filterUnit !== 'all') {
-      const goalUnitName = goal.unitName || `${goal.unitManager}_${goal.agencyName}`;
-      if (goalUnitName !== filterUnit) return false;
-    }
-    return true;
-  });
+  // filteredGoals is now memoized above and used everywhere (UI + aggregates)
 
   // Get unique agencies using canonical names from valid goals only
   const agenciesMap = new Map<string, string>(); // normalized -> canonical display name

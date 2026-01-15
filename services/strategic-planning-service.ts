@@ -589,13 +589,20 @@ export async function syncAllGoalsAgencyFromUsers(): Promise<{ success: boolean;
 
     // Create user map for quick lookup
     const userMap = new Map<string, { uid: string; agencyName: string; name: string }>();
+    const userByPersonKey = new Map<string, { uid: string; agencyName: string; name: string }>();
     allUsers.forEach(u => {
       if (u.agencyName) {
         userMap.set(u.uid, { uid: u.uid, agencyName: u.agencyName, name: u.name });
+        const key = nameCanonicalizer.getComparablePersonKey(u.name);
+        if (key) {
+          userByPersonKey.set(key, { uid: u.uid, agencyName: u.agencyName, name: u.name });
+        }
       }
     });
 
-    const batch = writeBatch(db);
+    // Firestore batch limit is 500 operations; keep a safety margin.
+    let batch = writeBatch(db);
+    let batchOps = 0;
     let updated = 0;
     let skipped = 0;
     const errors: string[] = [];
@@ -609,13 +616,20 @@ export async function syncAllGoalsAgencyFromUsers(): Promise<{ success: boolean;
       // Find matching user
       let matchingUser = userMap.get(goal.userId);
       
-      // If not found by UID, try flexible name matching
+      // If not found by UID, try person-key lookup (fast) then fall back to flexible matching
       if (!matchingUser) {
-        const foundUser = allUsers.find(u => 
-          nameCanonicalizer.areNamesLikelySamePerson(u.name, goal.userName) && u.agencyName
-        );
-        if (foundUser) {
-          matchingUser = { uid: foundUser.uid, agencyName: foundUser.agencyName, name: foundUser.name };
+        const personKey = nameCanonicalizer.getComparablePersonKey(goal.userName);
+        if (personKey) {
+          matchingUser = userByPersonKey.get(personKey);
+        }
+
+        if (!matchingUser) {
+          const foundUser = allUsers.find(u => 
+            nameCanonicalizer.areNamesLikelySamePerson(u.name, goal.userName) && u.agencyName
+          );
+          if (foundUser) {
+            matchingUser = { uid: foundUser.uid, agencyName: foundUser.agencyName, name: foundUser.name };
+          }
         }
       }
 
@@ -633,10 +647,17 @@ export async function syncAllGoalsAgencyFromUsers(): Promise<{ success: boolean;
           agencyName: canonicalAgency,
         });
         updated++;
+        batchOps++;
+
+        if (batchOps >= 450) {
+          await batch.commit();
+          batch = writeBatch(db);
+          batchOps = 0;
+        }
       }
     }
 
-    if (updated > 0) {
+    if (batchOps > 0) {
       await batch.commit();
     }
 
@@ -662,7 +683,9 @@ export async function updateGoalsAgencyForUsers(userAgencyMap: Map<string, strin
     const { getCanonicalAgencyName } = await import('@/lib/utils/agency-name-normalizer');
     const allGoals = await getAllGoals();
 
-    const batch = writeBatch(db);
+    // Firestore batch limit is 500 operations; keep a safety margin.
+    let batch = writeBatch(db);
+    let batchOps = 0;
     let updated = 0;
     const errors: string[] = [];
 
@@ -681,10 +704,17 @@ export async function updateGoalsAgencyForUsers(userAgencyMap: Map<string, strin
           agencyName: canonicalAgency,
         });
         updated++;
+        batchOps++;
+
+        if (batchOps >= 450) {
+          await batch.commit();
+          batch = writeBatch(db);
+          batchOps = 0;
+        }
       }
     }
 
-    if (updated > 0) {
+    if (batchOps > 0) {
       await batch.commit();
     }
 
