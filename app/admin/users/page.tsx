@@ -881,9 +881,9 @@ function UserCreateModal({
       return;
     }
     
-    // Allow "No Agency" for admins/superusers only
-    if (formData.agencyName === 'No Agency' && formData.role !== 'admin' && formData.role !== 'superuser') {
-      setError('"No Agency" option is only available for admins and superusers');
+    // Allow "No Agency" for admins/superusers/admin-viewers only
+    if (formData.agencyName === 'No Agency' && formData.role !== 'admin' && formData.role !== 'superuser' && formData.role !== 'admin-viewer') {
+      setError('"No Agency" option is only available for admins, superusers, and admin-viewers');
       return;
     }
 
@@ -1043,7 +1043,7 @@ function UserCreateModal({
                 required
               >
                 <option value="">Select Agency</option>
-                {(isSuperuser || formData.role === 'admin' || formData.role === 'superuser') && (
+                {(isSuperuser || formData.role === 'admin' || formData.role === 'superuser' || formData.role === 'admin-viewer') && (
                   <option value="No Agency">No Agency</option>
                 )}
                 {agencies.map(agency => (
@@ -1136,9 +1136,9 @@ function UserEditModal({
       return;
     }
     
-    // Allow "No Agency" for admins/superusers only
-    if (formData.agencyName === 'No Agency' && user.role !== 'admin' && user.role !== 'superuser') {
-      setError('"No Agency" option is only available for admins and superusers');
+    // Allow "No Agency" for admins/superusers/admin-viewers only
+    if (formData.agencyName === 'No Agency' && formData.role !== 'admin' && formData.role !== 'superuser' && formData.role !== 'admin-viewer') {
+      setError('"No Agency" option is only available for admins, superusers, and admin-viewers');
       return;
     }
 
@@ -1290,8 +1290,8 @@ function UserEditModal({
                 required
               >
                 <option value="">Select Agency</option>
-                {/* Show "No Agency" option if: user is admin/superuser OR user already has "No Agency" (allows reassigning) */}
-                {((isSuperuser || formData.role === 'admin' || formData.role === 'superuser') || user.agencyName === 'No Agency') && (
+                {/* Show "No Agency" option if: user is admin/superuser/admin-viewer OR user already has "No Agency" (allows reassigning) */}
+                {((isSuperuser || formData.role === 'admin' || formData.role === 'superuser' || formData.role === 'admin-viewer') || user.agencyName === 'No Agency') && (
                   <option value="No Agency">No Agency</option>
                 )}
                 {agencies.map(agency => (
